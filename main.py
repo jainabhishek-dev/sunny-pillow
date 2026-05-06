@@ -179,7 +179,7 @@ async def run_check(
         })
 
     try:
-        findings = await loop.run_in_executor(
+        findings, prompts = await loop.run_in_executor(
             None, partial(run_checks, file_data["full_text"], selected_checkpoints)
         )
     except Exception as exc:
@@ -209,6 +209,7 @@ async def run_check(
         "file_title": file_data["title"],
         "file_type": file_data["type"],
         "findings": findings,
+        "prompts": prompts,
         "comments_posted": comments_posted,
         "comment_error": comment_error,
         "is_pdf": file_data["type"] == "pdf",

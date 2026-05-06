@@ -181,6 +181,31 @@
   {{ findings | length }} {{ 'finding' if findings | length == 1 else 'findings' }} across the document
 </p>
 
+<script id="ai-prompts-data" type="application/json">
+  {{ (prompts or []) | tojson | safe }}
+</script>
+
+<script>
+  (function() {
+    const dataElement = document.getElementById('ai-prompts-data');
+    if (dataElement) {
+      try {
+        const prompts = JSON.parse(dataElement.textContent);
+        if (prompts && prompts.length > 0) {
+          console.group("AI Prompts (Debug Mode)");
+          prompts.forEach((p, i) => {
+            console.log(`%c Batch ${i + 1} Prompt:`, 'color: #4f46e5; font-weight: bold;');
+            console.log(p);
+          });
+          console.groupEnd();
+        }
+      } catch (e) {
+        console.error("Error parsing AI prompts:", e);
+      }
+    }
+  })();
+</script>
+
 {% endif %}
 
 {% endblock %}

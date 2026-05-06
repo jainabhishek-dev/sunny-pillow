@@ -45,12 +45,12 @@
         <p class="text-xs text-gray-400 mt-0.5">Choose which style rules to check in this run.</p>
       </div>
       <div class="flex gap-3">
-        <button type="button" onclick="selectAll()"
+        <button type="button" id="selectAllBtn"
           class="text-xs text-indigo-600 hover:text-indigo-800 font-medium transition">
           Select all
         </button>
         <span class="text-gray-300">|</span>
-        <button type="button" onclick="deselectAll()"
+        <button type="button" id="deselectAllBtn"
           class="text-xs text-gray-400 hover:text-gray-600 font-medium transition">
           Deselect all
         </button>
@@ -63,7 +63,7 @@
         <!-- Category header with select/deselect -->
         <div class="flex items-center justify-between mb-2">
           <span class="text-xs font-bold uppercase tracking-wider text-indigo-500">{{ category }}</span>
-          <button type="button" onclick="toggleCategory('{{ category | replace(' ', '_') }}')"
+          <button type="button" data-toggle-category="{{ category | replace(' ', '_') }}"
             class="text-xs text-gray-400 hover:text-gray-600 transition">
             toggle all
           </button>
@@ -129,29 +129,52 @@
 </div>
 
 <script>
-  document.getElementById('checkForm').addEventListener('submit', function () {
-    document.getElementById('btnText').textContent = 'Running…';
-    document.getElementById('btnSpinner').classList.remove('hidden');
-    document.getElementById('submitBtn').disabled = true;
-    document.getElementById('loadingOverlay').classList.remove('hidden');
+  document.addEventListener('DOMContentLoaded', () => {
+    const checkForm = document.getElementById('checkForm');
+    const btnText = document.getElementById('btnText');
+    const btnSpinner = document.getElementById('btnSpinner');
+    const submitBtn = document.getElementById('submitBtn');
+    const loadingOverlay = document.getElementById('loadingOverlay');
+
+    // Handle form submission loading state
+    if (checkForm && btnText && btnSpinner && submitBtn && loadingOverlay) {
+      checkForm.addEventListener('submit', () => {
+        btnText.textContent = 'Running…';
+        btnSpinner.classList.remove('hidden');
+        submitBtn.setAttribute('disabled', 'true');
+        loadingOverlay.classList.remove('hidden');
+      });
+    }
+
+    // Select All
+    document.getElementById('selectAllBtn')?.addEventListener('click', () => {
+      document.querySelectorAll('input[name="checkpoint_ids"]').forEach(el => {
+        if (el instanceof HTMLInputElement) el.checked = true;
+      });
+    });
+
+    // Deselect All
+    document.getElementById('deselectAllBtn')?.addEventListener('click', () => {
+      document.querySelectorAll('input[name="checkpoint_ids"]').forEach(el => {
+        if (el instanceof HTMLInputElement) el.checked = false;
+      });
+    });
+
+    // Toggle Category
+    document.querySelectorAll('[data-toggle-category]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const category = btn.getAttribute('data-toggle-category');
+        const container = document.querySelector(`[data-category="${category}"]`);
+        if (container) {
+          const checkboxes = Array.from(container.querySelectorAll('input[type="checkbox"]'));
+          const anyChecked = checkboxes.some(cb => (cb instanceof HTMLInputElement) && cb.checked);
+          checkboxes.forEach(cb => {
+            if (cb instanceof HTMLInputElement) cb.checked = !anyChecked;
+          });
+        }
+      });
+    });
   });
-
-  function selectAll() {
-    document.querySelectorAll('input[name="checkpoint_ids"]').forEach(cb => cb.checked = true);
-  }
-
-  function deselectAll() {
-    document.querySelectorAll('input[name="checkpoint_ids"]').forEach(cb => cb.checked = false);
-  }
-
-  function toggleCategory(category) {
-    const container = document.querySelector('[data-category="' + category + '"]');
-    const checkboxes = container.querySelectorAll('input[type="checkbox"]');
-    const anyChecked = Array.from(checkboxes).some(cb => cb.checked);
-    checkboxes.forEach(cb => cb.checked = !anyChecked);
-  }
-
-
 </script>
 
 {% endblock %}

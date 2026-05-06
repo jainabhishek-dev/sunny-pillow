@@ -15,5 +15,5 @@ input[type="checkbox"] {
 
 /* Keep the loading overlay above everything */
 #loadingOverlay {
-  backdrop-filter: blur(2px);
+  /* Removed backdrop-filter to prevent browser crashes during viewport shifts */
 }

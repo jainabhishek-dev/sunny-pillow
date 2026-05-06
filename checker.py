@@ -33,7 +33,7 @@ INSTRUCTIONS:
 - Be strict. If something looks like it could be a violation, flag it — do not give the benefit of the doubt. It is better to flag a possible issue than to miss a real one.
 - Do not be conservative. Editors rely on you to catch issues they might miss.
 - Quote the exact text from the document where the violation occurs (20–80 characters).
-- Provide the location as it appears in the document (e.g., "Paragraph 3", "Slide 2").
+- Provide the location as it appears in the document (e.g., "Page 1 Line 4").
 - Keep the "issue" field to 15 words or fewer. Be direct: state what is wrong.
 - Keep the "suggestion" field to 15 words or fewer. State the exact fix.
 - Do not explain, do not repeat the rule, do not add context — just the error and the fix.
@@ -46,7 +46,7 @@ Schema:
   {{
     "checkpoint_id": "cp_001",
     "quote": "exact text from document where the violation is",
-    "location": "Paragraph 3",
+    "location": "Page 4 Line 24",
     "issue": "What is wrong (max 15 words)",
     "suggestion": "Exact fix to apply (max 15 words)"
   }}
@@ -123,7 +123,7 @@ def _parse_response(raw: str) -> list[dict]:
     return _extract_complete_objects(raw)
 
 
-def _run_gemini(document_text: str, checkpoints: list[dict], config: dict) -> list[dict]:
+def _run_gemini(document_text: str, checkpoints: list[dict], config: dict) -> tuple[list[dict], list[str]]:
     import google.generativeai as genai
 
     api_key = os.getenv(config["api_key_env"])
@@ -143,18 +143,20 @@ def _run_gemini(document_text: str, checkpoints: list[dict], config: dict) -> li
 
     batch_size = config["batch_size"]
     all_findings = []
+    all_prompts = []
 
     for i in range(0, len(checkpoints), batch_size):
         batch = checkpoints[i : i + batch_size]
         prompt = _build_prompt(document_text, batch)
+        all_prompts.append(prompt)
         response = model.generate_content(prompt)
         findings = _parse_response(response.text)
         all_findings.extend(findings)
 
-    return all_findings
+    return all_findings, all_prompts
 
 
-def _run_anthropic(document_text: str, checkpoints: list[dict], config: dict) -> list[dict]:
+def _run_anthropic(document_text: str, checkpoints: list[dict], config: dict) -> tuple[list[dict], list[str]]:
     import anthropic
 
     api_key = os.getenv(config["api_key_env"])
@@ -166,10 +168,12 @@ def _run_anthropic(document_text: str, checkpoints: list[dict], config: dict) ->
     client = anthropic.Anthropic(api_key=api_key)
     batch_size = config["batch_size"]
     all_findings = []
+    all_prompts = []
 
     for i in range(0, len(checkpoints), batch_size):
         batch = checkpoints[i : i + batch_size]
         prompt = _build_prompt(document_text, batch)
+        all_prompts.append(prompt)
         message = client.messages.create(
             model=config["model"],
             max_tokens=config["max_tokens"],
@@ -179,22 +183,24 @@ def _run_anthropic(document_text: str, checkpoints: list[dict], config: dict) ->
         findings = _parse_response(raw)
         all_findings.extend(findings)
 
-    return all_findings
+    return all_findings, all_prompts
 
 
-def run_checks(document_text: str, selected_checkpoints: list[dict]) -> list[dict]:
+def run_checks(document_text: str, selected_checkpoints: list[dict]) -> tuple[list[dict], list[str]]:
     """
     Runs all selected checkpoints against the document text in batches.
-    Returns a list of finding dicts, each with:
+    Returns a tuple: (findings, prompts)
+    findings is a list of dicts, each with:
         checkpoint_id, quote, location, issue, suggestion
+    prompts is a list of the actual prompt strings sent to the AI.
     """
     config = _load_model_config()
     provider = config.get("provider", "gemini")
 
     if provider == "gemini":
-        findings = _run_gemini(document_text, selected_checkpoints, config)
+        findings, prompts = _run_gemini(document_text, selected_checkpoints, config)
     elif provider == "anthropic":
-        findings = _run_anthropic(document_text, selected_checkpoints, config)
+        findings, prompts = _run_anthropic(document_text, selected_checkpoints, config)
     else:
         raise ValueError(
             f"Unsupported provider '{provider}' in config/model_config.yaml. "
@@ -207,4 +213,4 @@ def run_checks(document_text: str, selected_checkpoints: list[dict]) -> list[dic
         f for f in findings
         if isinstance(f, dict) and required_keys.issubset(f.keys())
     ]
-    return valid
+    return valid, prompts

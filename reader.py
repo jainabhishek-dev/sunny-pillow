@@ -57,29 +57,31 @@ def _read_google_doc(docs_service, file_id: str) -> tuple[list[dict], str, list[
     doc = docs_service.documents().get(documentId=file_id).execute()
     sections = []
     text_runs = []  # (doc_start_index, run_text) — used for comment anchoring
-    paragraph_index = 0
+    page_number = 1
+    line_number = 1
 
     for element in doc.get("body", {}).get("content", []):
         if "paragraph" in element:
-            paragraph_index += 1
+            # Check for explicit page breaks in the paragraph elements
+            for part in element["paragraph"].get("elements", []):
+                if "pageBreak" in part:
+                    page_number += 1
+                    line_number = 1
+
             text_parts = []
             for part in element["paragraph"].get("elements", []):
                 run = part.get("textRun", {})
                 content = run.get("content", "")
                 start_idx = part.get("startIndex", 0)
                 if content:
-                    # Always include the run in the paragraph text — even a
-                    # whitespace-only run matters when it separates two words
-                    # that have different formatting (e.g. bold/colour boundary).
-                    # Dropping it would merge the adjacent words and cause false
-                    # "missing space" findings from the AI.
                     text_parts.append(content)
                 if content.strip():
-                    # Only index non-whitespace runs for comment anchoring.
                     text_runs.append((start_idx, content))
+            
             text = "".join(text_parts).strip()
             if text:
-                sections.append({"location": f"Paragraph {paragraph_index}", "text": text})
+                sections.append({"location": f"Page {page_number} Line {line_number}", "text": text})
+                line_number += 1
 
     full_text = "\n\n".join(
         f"[{s['location']}] {s['text']}" for s in sections
@@ -110,7 +112,7 @@ def _read_google_slides(slides_service, file_id: str) -> tuple[list[dict], str]:
             slide_text = "".join(slide_texts).strip()
             if slide_text:
                 sections.append({
-                    "location": f"Slide {slide_index}",
+                    "location": f"Page {slide_index} Line 1",
                     "text": slide_text,
                 })
 
@@ -127,14 +129,18 @@ def _read_pdf(drive_service, file_id: str) -> tuple[list[dict], str]:
         .execute()
     )
     raw_text = content.decode("utf-8") if isinstance(content, bytes) else content
-    lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
-    # Group into paragraphs of ~5 lines each for location reporting
+    
+    # Split by form feed character (\f) to get pages
+    pages = raw_text.split('\f')
     sections = []
-    chunk_size = 5
-    for i in range(0, len(lines), chunk_size):
-        chunk = " ".join(lines[i : i + chunk_size])
-        paragraph_num = (i // chunk_size) + 1
-        sections.append({"location": f"Paragraph {paragraph_num}", "text": chunk})
+    
+    for page_idx, page_content in enumerate(pages, start=1):
+        lines = [line.strip() for line in page_content.splitlines() if line.strip()]
+        for line_idx, line in enumerate(lines, start=1):
+            sections.append({
+                "location": f"Page {page_idx} Line {line_idx}",
+                "text": line
+            })
 
     full_text = "\n\n".join(f"[{s['location']}] {s['text']}" for s in sections)
     return sections, full_text
