@@ -1,0 +1,23 @@
+# AI provider configuration for Sunny Pillow.
+# Change provider + model + api_key_env to switch AI backends with no code changes.
+
+# Supported providers: gemini | anthropic
+provider: gemini
+
+# Gemini models: gemini-2.0-flash | gemini-2.5-flash | gemini-1.5-pro
+# Anthropic models: claude-sonnet-4-6 | claude-opus-4-7
+model: gemini-2.5-flash
+
+# Name of the environment variable that holds the API key for the chosen provider.
+api_key_env: GEMINI_API_KEY
+
+# Number of checkpoints to send per AI call.
+# Lower = more focused but slower. Higher = faster but AI may lose precision.
+batch_size: 3
+
+# Keep low for deterministic, rule-following output.
+temperature: 0.1
+
+# Maximum tokens in the AI response per batch call.
+# Gemini 2.0/2.5 Flash supports up to 8192 output tokens.
+max_tokens: 16384

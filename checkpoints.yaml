@@ -1,0 +1,398 @@
+# LEAD House Style Checkpoints
+# Source: House Style Guidelines V2
+# Each checkpoint maps to a specific, actionable rule that AI can check.
+
+checkpoints:
+
+  # â”€â”€â”€ 1. SPELLING â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  - id: cp_001
+    category: Spelling
+    name: British English spellings
+    description: >
+      Use British English spellings throughout. Common examples:
+      'realise' (not 'realize'), 'organisation' (not 'organization'),
+      'cancelled' (not 'canceled'), 'aeroplane' (not 'airplane'),
+      'fulfil' (not 'fulfill'), 'fibre' (not 'fiber'), 'colour' (not 'color'),
+      'behaviour' (not 'behavior'), 'centre' (not 'center').
+      Flag any American English spellings.
+    type: rule
+
+  - id: cp_002
+    category: Spelling
+    name: Past tense -ed ending (not -t)
+    description: >
+      Verbs take -d or -ed endings in the past tense, not the British -t ending.
+      Use 'learned' (not 'learnt'), 'burned' (not 'burnt'), 'spelled' (not 'spelt'),
+      'dreamed' (not 'dreamt'), 'leaped' (not 'leapt').
+    type: rule
+
+  - id: cp_003
+    category: Spelling
+    name: LEAD-specific spellings
+    description: >
+      Use 'flowchart' (not 'flow chart') and 'waterbodies' (not 'water bodies').
+      These are LEAD-specific single-word or compound spellings.
+    type: rule
+
+  # â”€â”€â”€ 2. OXFORD (SERIAL) COMMA â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  - id: cp_004
+    category: Punctuation
+    name: Oxford comma
+    description: >
+      Add a comma after the penultimate item in a list of three or more items
+      before 'and' and 'or'. Example correct: 'Air, water, and land.'
+      Example correct: 'Tea, coffee, or milk.' Flag lists of 3+ items missing
+      the comma before 'and' or 'or'.
+    type: rule
+
+  # â”€â”€â”€ 3. ABBREVIATIONS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  - id: cp_005
+    category: Abbreviations
+    name: No full stops in acronyms or abbreviations
+    description: >
+      Do not use full stops between capitalised letters of abbreviations and
+      acronyms. Correct: AIDS, LHS, USA. Incorrect: A.I.D.S., U.S.A.
+      Also, do not use full stops in abbreviated units of measurement.
+      Correct: km, cm, mg. Incorrect: k.m., c.m.
+    type: rule
+
+  - id: cp_006
+    category: Abbreviations
+    name: No apostrophe in plural abbreviations
+    description: >
+      Do not use an apostrophe when forming the plural of abbreviations.
+      Correct: ATMs, MPs, CEOs. Incorrect: ATM's, MP's, CEO's.
+    type: rule
+
+  - id: cp_007
+    category: Abbreviations
+    name: No full stop after title abbreviations
+    description: >
+      Do not use a full stop after abbreviations that indicate titles.
+      Correct: Dr, Mr, Mrs, Prof. Incorrect: Dr., Mr., Mrs., Prof.
+    type: rule
+
+  - id: cp_008
+    category: Abbreviations
+    name: No comma after i.e. and e.g.
+    description: >
+      Do not use a comma immediately after Latin abbreviations i.e. and e.g.
+      Correct: 'The symptoms may last for a short period, i.e. from three to five days.'
+      Incorrect: 'i.e., from three to five days.'
+    type: rule
+
+  - id: cp_009
+    category: Abbreviations
+    name: Correct usage of etc.
+    description: >
+      Avoid using 'etc.' in formal writing. When used:
+      (1) Do not use 'etc.' at the end of a series that begins with 'for example',
+      'e.g.', 'including', 'such as', or 'like' â€” these make 'etc.' redundant.
+      (2) Do not use 'and etc.' â€” never combine 'and' with 'etc.'.
+      (3) Always use a comma before 'etc.' in a list.
+      (4) 'etc.' always ends with a period and is not followed by a comma.
+      (5) If 'etc.' ends a sentence, only one period is used.
+    type: rule
+
+  # â”€â”€â”€ 4. QUOTATION MARKS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  - id: cp_010
+    category: Punctuation
+    name: Single vs double quotation marks
+    description: >
+      Use SINGLE quotation marks for: quoted sentences in questions, chapter names,
+      titles of short poems/songs, and colloquialisms in formal text.
+      Use DOUBLE quotation marks for: direct speech.
+      Use single quotation marks inside double for a quote within a quote.
+      Example: "Have you any idea what 'red mercury' is?"
+      Flag incorrect use of double quotes where single should be used and vice versa.
+    type: judgment
+
+  # â”€â”€â”€ 5. ELLIPSIS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  - id: cp_011
+    category: Punctuation
+    name: Ellipsis formatting
+    description: >
+      An ellipsis must be written as three separate dots with a space between
+      each dot and a space on either side: ' . . . ' â€” not '...' or 'â€¦'.
+      When used for continuation at bottom of a slide: '(Continued . . .)'.
+      When the preceding sentence ends just before the ellipsis, retain that
+      punctuation before the ellipsis.
+    type: rule
+
+  # â”€â”€â”€ 6. HYPHEN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  - id: cp_012
+    category: Punctuation
+    name: Hyphen vs dash confusion
+    description: >
+      Hyphens (-) must never be used interchangeably with en dashes (â€“) or
+      em dashes (â€”). A hyphen is shorter and joins words; dashes separate
+      clauses or indicate ranges. Flag any hyphen used where a dash is clearly needed.
+    type: rule
+
+  - id: cp_013
+    category: Punctuation
+    name: Compound modifier hyphenation
+    description: >
+      Hyphenate two or more words when they come before a noun they modify
+      and act as a single idea. Example: 'off-campus apartment', 'family-owned cafÃ©'.
+      Do not hyphenate -ly adverbs before or after a noun: 'smartly dressed' (no hyphen).
+      Do not use hyphens in noun phrases: 'Labour Party conference' (no hyphen).
+    type: judgment
+
+  - id: cp_014
+    category: Punctuation
+    name: Hyphenation with prefixes
+    description: >
+      Hyphenate words with these prefixes: self-, ex- (meaning former), all-,
+      sub-, non-, post-, anti-.
+      For re-: only hyphenate when omitting it would cause confusion with another word.
+      Example: 're-press' (not 'repress' if meaning 'press again'), but 'reteach' (not 're-teach').
+      'cooperate' and 'coordinate' should be spelt without a hyphen.
+      'prerequisite' â€” no hyphen (not 'pre-requisite').
+    type: rule
+
+  - id: cp_015
+    category: Punctuation
+    name: Hyphens in spelled-out fractions and numbers
+    description: >
+      Hyphenate all spelled-out fractions: 'two-thirds', 'one-half'.
+      Hyphenate spelled-out numbers greater than twenty: 'twenty-one', 'thirty-three'.
+    type: rule
+
+  # â”€â”€â”€ 7. COLON â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  - id: cp_016
+    category: Punctuation
+    name: Colon usage in stems
+    description: >
+      All question/instruction stems that are complete sentences must end with
+      a full stop, NOT a colon â€” unless the words 'following' or 'as follows'
+      are used, in which case a colon is correct.
+      Incomplete lead-in sentences must NOT end in a colon. If options complete
+      the sentence, add a full stop after each option.
+      If the sentence following a colon is a complete sentence, capitalise the
+      first word after the colon.
+      Do not capitalise the word following a colon unless it is a proper noun
+      or a complete sentence follows.
+    type: judgment
+
+  # â”€â”€â”€ 8. DASHES â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  - id: cp_017
+    category: Punctuation
+    name: En dash usage
+    description: >
+      Use an en dash (â€“) â€” not a hyphen (-) â€” for:
+      (1) Relationships between words (conflict, connection, direction): 'Northâ€“South corridor'.
+      (2) Number/year ranges with no space before or after: 'slides 1â€“9', '1939â€“45'.
+      (3) Temperature/percentage ranges without space: '30Â°Câ€“50Â°C', '65%â€“70%'.
+      Page ranges: abbreviate as 'Pg.' and do not repeat it: 'Pg. 21â€“25' (not 'Pg. 21â€“Pg. 25').
+    type: rule
+
+  - id: cp_018
+    category: Punctuation
+    name: Em dash usage
+    description: >
+      Use an em dash (â€”) â€” not a hyphen or en dash â€” for:
+      (1) CRL headings/slide titles: 'Practice Question 3.1 â€” Solution'.
+      (2) Parenthetical dashes (inserting a aside into a sentence).
+      Always add a space before and after the em dash.
+      Example: 'The bakery offered three kinds â€” plain, almond, and chocolate â€” in their menu.'
+    type: rule
+
+  # â”€â”€â”€ 9. CAPITALISATION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  - id: cp_019
+    category: Capitalisation
+    name: Minimal capitalisation
+    description: >
+      Keep capitalisation to a minimum. Only capitalise proper nouns and
+      adjectives derived from proper nouns. Common nouns used with a date,
+      number, or letter should NOT be capitalised.
+      Exceptions (always capitalise): Term, Chapter, Class.
+      'internet' must always be written with a lowercase 'i'.
+      Flag any unnecessary capitalisation of common nouns.
+    type: judgment
+
+  - id: cp_020
+    category: Capitalisation
+    name: Earth / earth usage
+    description: >
+      Capitalise 'Earth' (without 'the') only when referring to it in the
+      context of other planets, space, or as a heavenly body.
+      In all other instances, use 'the earth' (lowercase).
+      Flag: 'the Earth is home to life' (should be 'the earth');
+      also flag: 'Venus is the same size as earth' (should be 'Earth').
+    type: rule
+
+  - id: cp_021
+    category: Capitalisation
+    name: Sun and moon capitalisation
+    description: >
+      The words 'sun' and 'moon' are only capitalised in pre-primary and
+      primary (EVS) content. In all other content, use lowercase 'sun' and 'moon'.
+    type: rule
+
+  # â”€â”€â”€ 10. TITLE CASING â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  - id: cp_022
+    category: Capitalisation
+    name: Title casing in headings
+    description: >
+      All headings must be in title case unless the heading is a full sentence
+      or a question.
+      In title case: capitalise all nouns, pronouns, adjectives, adverbs, verbs,
+      and helping verbs.
+      Do NOT capitalise: articles (a, an, the), conjunctions (and, but, or),
+      and prepositions (in, of, on, at) â€” unless they are the first or last word.
+      Flag headings that are not full sentences but are not in title case.
+    type: rule
+
+  # â”€â”€â”€ 11. ITALICS, BOLD, ROMAN TEXT, SMALL CAPS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  - id: cp_023
+    category: Formatting
+    name: Italics usage
+    description: >
+      Use italics for: foreign words; binomial nomenclature (genus capitalised,
+      species not: 'Homo sapiens'); titles of books, journals, works of art,
+      films, aircraft, trains, ships.
+      Do NOT italicise: epics and names of holy books (Ramayana, Koran, Bible).
+      Flag unitalicised scientific names or book/film titles.
+    type: judgment
+
+  - id: cp_024
+    category: Formatting
+    name: Latin abbreviations not italicised
+    description: >
+      Commonly used Latin abbreviations (i.e., e.g., viz., etc.) must be written
+      in Roman text (non-italics), not in italics.
+    type: rule
+
+  - id: cp_025
+    category: Formatting
+    name: Small caps for chronological terms
+    description: >
+      Chronological terms CE, BCE, AD, and BC must be typeset in small caps.
+      In working files (PPT/Word), highlight these terms so the DTP team can
+      apply small caps. Flag any CE/BCE/AD/BC that appears in regular font
+      without being highlighted.
+    type: rule
+
+  # â”€â”€â”€ 12. NUMBERS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  - id: cp_026
+    category: Numbers
+    name: Spell out numbers one to nine
+    description: >
+      Numbers from one to nine must be spelled out in words, EXCEPT in these cases:
+      units of measurement (use figures: '30 kilometres'), dates (use figures: '9 September'),
+      approximate numbers (words: 'at least a thousand'), and at the start of a
+      sentence (words: 'Two hundred gold bars').
+      Round numbers of a million or more use both: 'Â£8.5 million'.
+      Flag digit forms (1â€“9) used in running text where words are required.
+    type: rule
+
+  # â”€â”€â”€ 13. FORMATTING FIGURES â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  - id: cp_027
+    category: Numbers
+    name: Number formatting with commas
+    description: >
+      In non-technical texts, separate digits using commas (not spaces) in
+      numbers of four or more digits: '1,000'; '2,50,000'.
+      For decimal quantities less than one, insert a zero before the decimal
+      point: '0.768' (not '.768').
+      Flag numbers â‰¥1000 written without commas, and decimals < 1 without a leading zero.
+    type: rule
+
+  # â”€â”€â”€ 14. DATES â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  - id: cp_028
+    category: Dates & Time
+    name: Date format
+    description: >
+      Dates must be written in British English order: Day Month Year (no commas).
+      Correct: '1 January 2022'. Incorrect: 'January 1, 2022' or 'January 1st, 2022'.
+      Never use ordinal indicators (1st, 2nd, 3rd, 4th) with complete dates.
+      Always use all four digits for years. Never place a comma between month and year.
+      For decades, use numerals without apostrophe: '1960s' (not '1960's').
+    type: rule
+
+  - id: cp_029
+    category: Dates & Time
+    name: BC/AD and BCE/CE consistency
+    description: >
+      Use either BC/AD OR BCE/CE â€” do not mix both systems in the same text.
+      AD precedes the year ('AD 500'); BC, BCE, and CE follow the year ('800 CE', '500 BC').
+      When providing a range of years, do not repeat the century: '1939â€“41' (not '1939â€“1941').
+    type: rule
+
+  # â”€â”€â”€ 15. UNITS OF MEASUREMENT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  - id: cp_030
+    category: Numbers
+    name: Units of measurement formatting
+    description: >
+      When a numeral precedes a unit, always use the abbreviated form of the unit.
+      Add a space between the number and the unit: '500 cm', '30 km', '25 mg'.
+      Abbreviations do not change in plural form: '500 cm' (not '500 cms').
+      Flag full-word units used after a numeral (e.g., '500 centimetres' â†’ '500 cm').
+    type: rule
+
+  # â”€â”€â”€ 16. SYMBOLS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  - id: cp_031
+    category: Symbols
+    name: Symbol formatting
+    description: >
+      No space between number/letter and its symbol: 'â‚¹500', '21Â°C', '65%'.
+      Use the Indian rupee symbol â‚¹, not 'Rs.' or 'Rs'.
+      Use the multiplication symbol Ã— (not the letter 'x' or asterisk '*').
+      Use the proper minus sign âˆ’ (not an en dash 'â€“' or hyphen '-').
+      Do not replace symbols with words in complete sentences
+      (e.g., do not write 'Number of tickets = 128' in a prose sentence;
+      write it as an equation only in mathematical context).
+    type: rule
+
+  # â”€â”€â”€ 17. TIME â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  - id: cp_032
+    category: Dates & Time
+    name: Time formatting
+    description: >
+      Use 'am' and 'pm' (not 'a.m.' or 'p.m.'). Add a space between the numeral
+      and am/pm: '1 pm', '4 pm'. Use numerals when specifying time with am/pm.
+      Use 'noon' and 'midnight' instead of '12 noon' or '12 midnight'.
+      Time must be mentioned before day and date: 'at 4 pm on Friday' (not 'on Friday at 4 pm').
+      If showing hours and minutes, keep the format consistent throughout: '7:10 am to 9:30 pm'.
+    type: rule
+
+  # â”€â”€â”€ 18. NUMBERING OF QUESTIONS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  - id: cp_033
+    category: Structure
+    name: Question numbering format
+    description: >
+      In LEAD Active, Expert, and Achiever books, questions are numbered based on
+      the practice question number. For Practice Question 10, sub-questions are
+      numbered 10.1, 10.2, 10.3.
+      Sub-question options use: (a), (b), (c) at first level; (i), (ii), (iii) at second.
+      Flag any question numbering that deviates from this hierarchical format.
+    type: rule
+
+  # ─── 19. GRAMMAR & GENERAL ERRORS ───────────────────────────────────────────
+  - id: cp_034
+    category: Grammar
+    name: General grammar check
+    description: >
+      Flag any grammatical errors, including subject-verb agreement, 
+      incorrect tense usage, misplaced modifiers, and sentence fragments. 
+      Ensure sentences are clear and syntactically correct.
+    type: judgment
+
+  - id: cp_035
+    category: Spelling
+    name: General spelling mistakes
+    description: >
+      Flag any clear spelling mistakes or typos that are not already covered 
+      by the British English rule. This includes common typos, transposed 
+      letters, and missing characters.
+    type: rule
+
+  - id: cp_036
+    category: Grammar
+    name: Repeated words
+    description: >
+      Flag instances of unintentional repeated words (e.g., 'the the', 'is is', 
+      'in in'). These often occur at line breaks or during editing.
+    type: rule
+

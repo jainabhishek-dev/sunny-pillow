@@ -1,0 +1,31 @@
+# Environment variables — never commit secrets
+.env
+
+# Python virtual environments
+venv/
+.venv/
+env/
+.env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Distribution / build
+dist/
+build/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temp results written by the app (local dev only)
+sunny_pillow_results/

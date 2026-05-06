@@ -1,0 +1,19 @@
+/* Sunny Pillow — custom styles layered on top of Tailwind */
+
+/* Clamp long text in table cells to 3 lines */
+.line-clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Smooth checkbox transitions */
+input[type="checkbox"] {
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+/* Keep the loading overlay above everything */
+#loadingOverlay {
+  backdrop-filter: blur(2px);
+}

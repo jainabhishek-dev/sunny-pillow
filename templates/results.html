@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+{% block title %}Results — Sunny Pillow{% endblock %}
+
+{% block content %}
+
+<!-- Header -->
+<div class="mb-6 flex items-center justify-between">
+  <div>
+    <h2 class="text-2xl font-bold text-gray-800">Check Results</h2>
+    <p class="text-gray-500 text-sm mt-1 truncate max-w-xl">{{ file_title }}</p>
+  </div>
+  <a href="/"
+     class="inline-flex items-center gap-2 text-sm text-indigo-600 hover:text-indigo-800 font-medium transition">
+    ← Run another check
+  </a>
+</div>
+
+<!-- Summary card -->
+<div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
+  <div class="flex flex-wrap gap-6 items-center">
+
+    <!-- Findings count -->
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-xl flex items-center justify-center
+        {% if findings %}bg-amber-50{% else %}bg-green-50{% endif %}">
+        {% if findings %}
+        <svg class="w-5 h-5 text-amber-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round"
+            d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126z"/>
+        </svg>
+        {% else %}
+        <svg class="w-5 h-5 text-green-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        {% endif %}
+      </div>
+      <div>
+        <p class="text-2xl font-bold {% if findings %}text-amber-600{% else %}text-green-600{% endif %}">
+          {{ findings | length }}
+        </p>
+        <p class="text-xs text-gray-400">{{ 'finding' if findings | length == 1 else 'findings' }}</p>
+      </div>
+    </div>
+
+    <div class="w-px h-10 bg-gray-100 hidden sm:block"></div>
+
+    <!-- Comments posted / PDF notice -->
+    {% if is_pdf %}
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-xl bg-gray-50 flex items-center justify-center">
+        <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round"
+            d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/>
+        </svg>
+      </div>
+      <div>
+        <p class="text-sm font-semibold text-gray-600">PDF file</p>
+        <p class="text-xs text-gray-400">Comments cannot be added to PDFs — review findings below</p>
+      </div>
+    </div>
+    {% else %}
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-xl flex items-center justify-center
+        {% if comments_posted > 0 %}bg-indigo-50{% else %}bg-gray-50{% endif %}">
+        <svg class="w-5 h-5 {% if comments_posted > 0 %}text-indigo-500{% else %}text-gray-400{% endif %}"
+             fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round"
+            d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 01.865-.501 48.172 48.172 0 003.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z"/>
+        </svg>
+      </div>
+      <div>
+        <p class="text-2xl font-bold {% if comments_posted > 0 %}text-indigo-600{% else %}text-gray-400{% endif %}">
+          {{ comments_posted }}
+        </p>
+        <p class="text-xs text-gray-400">
+          {{ 'comment' if comments_posted == 1 else 'comments' }} added to file
+        </p>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- File type badge -->
+    <div class="ml-auto">
+      <span class="text-xs px-2.5 py-1 rounded-full font-medium
+        {% if file_type == 'google_doc' %}bg-blue-50 text-blue-600
+        {% elif file_type == 'google_slides' %}bg-orange-50 text-orange-600
+        {% else %}bg-gray-100 text-gray-500{% endif %}">
+        {% if file_type == 'google_doc' %}Google Doc
+        {% elif file_type == 'google_slides' %}Google Slides
+        {% else %}PDF{% endif %}
+      </span>
+    </div>
+
+  </div>
+</div>
+
+<!-- Comment error banner -->
+{% if comment_error %}
+<div class="mb-6 bg-amber-50 border border-amber-200 text-amber-700 rounded-xl px-5 py-4 text-sm flex items-start gap-3">
+  <svg class="w-5 h-5 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+    <path stroke-linecap="round" stroke-linejoin="round"
+      d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126z"/>
+  </svg>
+  <span>{{ comment_error }}</span>
+</div>
+{% endif %}
+
+<!-- All clear -->
+{% if not findings %}
+<div class="bg-green-50 border border-green-200 rounded-2xl p-10 text-center">
+  <div class="text-4xl mb-3">✅</div>
+  <p class="text-green-700 font-semibold text-lg">No issues found</p>
+  <p class="text-green-600 text-sm mt-1">The selected checkpoints passed for this document.</p>
+</div>
+
+{% else %}
+
+<!-- Findings table -->
+<div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+
+  <!-- Table header -->
+  <div class="grid grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,2fr)_minmax(0,2fr)_minmax(0,2fr)]
+              gap-4 px-6 py-3 bg-gray-50 border-b border-gray-100 text-xs font-semibold uppercase tracking-wide text-gray-400">
+    <span>Checkpoint</span>
+    <span>Location</span>
+    <span>Quoted text</span>
+    <span>Issue</span>
+    <span>Suggestion</span>
+  </div>
+
+  <!-- Rows -->
+  {% for finding in findings %}
+  {% set cp = checkpoint_map.get(finding.checkpoint_id, {}) %}
+  <div class="grid grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,2fr)_minmax(0,2fr)_minmax(0,2fr)]
+              gap-4 px-6 py-4 border-b border-gray-50 hover:bg-gray-50 transition items-start
+              {% if loop.last %}border-b-0{% endif %}">
+
+    <!-- Checkpoint -->
+    <div class="min-w-0">
+      <p class="text-sm font-medium text-gray-800 leading-snug">
+        {{ cp.get('name', finding.checkpoint_id) }}
+      </p>
+      <p class="text-xs text-gray-400 mt-0.5">{{ finding.checkpoint_id }}</p>
+    </div>
+
+    <!-- Location -->
+    <div class="min-w-0">
+      <span class="inline-block text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-md font-medium">
+        {{ finding.location }}
+      </span>
+    </div>
+
+    <!-- Quote -->
+    <div class="min-w-0">
+      <p class="text-sm text-gray-600 italic leading-relaxed line-clamp-3">
+        "{{ finding.quote }}"
+      </p>
+    </div>
+
+    <!-- Issue -->
+    <div class="min-w-0">
+      <p class="text-sm text-red-700 leading-relaxed line-clamp-3">
+        {{ finding.issue }}
+      </p>
+    </div>
+
+    <!-- Suggestion -->
+    <div class="min-w-0">
+      <p class="text-sm text-green-700 leading-relaxed line-clamp-3">
+        {{ finding.suggestion }}
+      </p>
+    </div>
+
+  </div>
+  {% endfor %}
+
+</div>
+
+<!-- Count footer -->
+<p class="text-xs text-gray-400 mt-3 text-right">
+  {{ findings | length }} {{ 'finding' if findings | length == 1 else 'findings' }} across the document
+</p>
+
+{% endif %}
+
+{% endblock %}
