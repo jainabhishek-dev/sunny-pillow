@@ -118,11 +118,14 @@
 
 </form>
 
-<!-- Loading overlay (Low-Resource Version) -->
-<div id="loadingOverlay" class="hidden fixed inset-0 flex flex-col items-center justify-center gap-4">
-  <div class="pure-spinner"></div>
-  <p style="color: #4338ca; font-weight: 600; font-size: 1.125rem;">Checking your document…</p>
-  <p style="color: #9ca3af; font-size: 0.875rem;">This may take up to a minute depending on document length.</p>
+<!-- Loading overlay -->
+<div id="loadingOverlay" class="hidden fixed inset-0 bg-white bg-opacity-80 z-50 flex flex-col items-center justify-center gap-4">
+  <svg class="animate-spin h-10 w-10 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+  </svg>
+  <p class="text-indigo-700 font-semibold text-lg">Checking your document…</p>
+  <p class="text-gray-400 text-sm">This may take up to a minute depending on document length.</p>
 </div>
 
 <script>
