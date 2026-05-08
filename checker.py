@@ -2,8 +2,10 @@ import json
 import os
 import re
 from pathlib import Path
+from io import BytesIO
 
 import yaml
+from PIL import Image
 
 
 def _load_model_config() -> dict:
@@ -12,47 +14,29 @@ def _load_model_config() -> dict:
         return yaml.safe_load(f)
 
 
-def _build_prompt(document_text: str, batch: list[dict]) -> str:
+def _build_vision_prompt(checkpoints: list[dict], page_num: int) -> str:
+    """Build the vision AI prompt for checking a single page image."""
     rules = "\n".join(
         f"{i + 1}. [{cp['id']}] {cp['name']}: {cp['description'].strip()}"
-        for i, cp in enumerate(batch)
+        for i, cp in enumerate(checkpoints)
     )
     return f"""You are a professional editorial checker for LEAD, an educational publishing house.
 
-Your task is to read the document below and check it against the specific style rules listed.
+Check the document page image provided against ONLY these style rules:
 
-DOCUMENT:
-{document_text}
-
-STYLE RULES TO CHECK (check ONLY these — ignore all others):
 {rules}
 
 INSTRUCTIONS:
-- Read the document carefully and thoroughly.
-- For each rule, identify EVERY instance where the document violates it.
-- Be strict. If something looks like it could be a violation, flag it — do not give the benefit of the doubt. It is better to flag a possible issue than to miss a real one.
-- Do not be conservative. Editors rely on you to catch issues they might miss.
-- Quote the exact text from the document where the violation occurs (20–80 characters).
-- Provide the location as it appears in the document (e.g., "Page 1 Line 4").
-- Keep the "issue" field to 15 words or fewer. Be direct: state what is wrong.
-- Keep the "suggestion" field to 15 words or fewer. State the exact fix.
-- Do not explain, do not repeat the rule, do not add context — just the error and the fix.
-- If a rule genuinely has no violations after careful reading, do not include it in the output.
-
-Return a JSON array only. No explanation, no markdown fences, no text outside the array.
+- Read the page image carefully.
+- For each rule, flag EVERY violation you can see.
+- Quote exact text from the page (20–80 characters).
+- Keep issue and suggestion fields to 15 words or fewer each.
+- Return a JSON array only. No markdown, no explanation.
 
 Schema:
-[
-  {{
-    "checkpoint_id": "cp_001",
-    "quote": "exact text from document where the violation is",
-    "location": "Page 4 Line 24",
-    "issue": "What is wrong (max 15 words)",
-    "suggestion": "Exact fix to apply (max 15 words)"
-  }}
-]
+[{{"checkpoint_id": "cp_001", "quote": "...", "location": "Page {page_num}", "issue": "...", "suggestion": "..."}}]
 
-If there are no violations for any of the checked rules, return an empty array: []"""
+Return [] if no violations found on this page."""
 
 
 def _extract_complete_objects(text: str) -> list[dict]:
@@ -123,7 +107,8 @@ def _parse_response(raw: str) -> list[dict]:
     return _extract_complete_objects(raw)
 
 
-def _run_gemini(document_text: str, checkpoints: list[dict], config: dict) -> tuple[list[dict], list[str]]:
+def _run_gemini_vision(image_bytes: bytes, checkpoints: list[dict], page_num: int, config: dict) -> list[dict]:
+    """Call Gemini with vision capabilities."""
     import google.generativeai as genai
 
     api_key = os.getenv(config["api_key_env"])
@@ -141,23 +126,19 @@ def _run_gemini(document_text: str, checkpoints: list[dict], config: dict) -> tu
         ),
     )
 
-    batch_size = config["batch_size"]
-    all_findings = []
-    all_prompts = []
+    # Convert bytes to PIL Image
+    image = Image.open(BytesIO(image_bytes))
 
-    for i in range(0, len(checkpoints), batch_size):
-        batch = checkpoints[i : i + batch_size]
-        prompt = _build_prompt(document_text, batch)
-        all_prompts.append(prompt)
-        response = model.generate_content(prompt)
-        findings = _parse_response(response.text)
-        all_findings.extend(findings)
-
-    return all_findings, all_prompts
+    prompt = _build_vision_prompt(checkpoints, page_num)
+    response = model.generate_content([prompt, image])
+    findings = _parse_response(response.text)
+    return findings
 
 
-def _run_anthropic(document_text: str, checkpoints: list[dict], config: dict) -> tuple[list[dict], list[str]]:
+def _run_anthropic_vision(image_bytes: bytes, checkpoints: list[dict], page_num: int, config: dict) -> list[dict]:
+    """Call Anthropic Claude with vision capabilities."""
     import anthropic
+    import base64
 
     api_key = os.getenv(config["api_key_env"])
     if not api_key:
@@ -166,41 +147,59 @@ def _run_anthropic(document_text: str, checkpoints: list[dict], config: dict) ->
         )
 
     client = anthropic.Anthropic(api_key=api_key)
-    batch_size = config["batch_size"]
-    all_findings = []
-    all_prompts = []
 
-    for i in range(0, len(checkpoints), batch_size):
-        batch = checkpoints[i : i + batch_size]
-        prompt = _build_prompt(document_text, batch)
-        all_prompts.append(prompt)
-        message = client.messages.create(
-            model=config["model"],
-            max_tokens=config["max_tokens"],
-            messages=[{"role": "user", "content": prompt}],
-        )
-        raw = message.content[0].text
-        findings = _parse_response(raw)
-        all_findings.extend(findings)
+    # Encode image as base64
+    image_data = base64.standard_b64encode(image_bytes).decode("utf-8")
 
-    return all_findings, all_prompts
+    prompt = _build_vision_prompt(checkpoints, page_num)
+    message = client.messages.create(
+        model=config["model"],
+        max_tokens=config["max_tokens"],
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/jpeg",
+                            "data": image_data,
+                        },
+                    },
+                    {
+                        "type": "text",
+                        "text": prompt,
+                    },
+                ],
+            }
+        ],
+    )
+    raw = message.content[0].text
+    findings = _parse_response(raw)
+    return findings
 
 
-def run_checks(document_text: str, selected_checkpoints: list[dict]) -> tuple[list[dict], list[str]]:
+def run_vision_check(image_bytes: bytes, checkpoints: list[dict], page_num: int) -> list[dict]:
     """
-    Runs all selected checkpoints against the document text in batches.
-    Returns a tuple: (findings, prompts)
-    findings is a list of dicts, each with:
-        checkpoint_id, quote, location, issue, suggestion
-    prompts is a list of the actual prompt strings sent to the AI.
+    Runs vision-based checking on a single page image.
+
+    Args:
+        image_bytes: JPEG image bytes
+        checkpoints: list of checkpoint dicts with 'id', 'name', 'description'
+        page_num: page number (for location field in findings)
+
+    Returns:
+        list of finding dicts, each with:
+            checkpoint_id, quote, location, issue, suggestion
     """
     config = _load_model_config()
     provider = config.get("provider", "gemini")
 
     if provider == "gemini":
-        findings, prompts = _run_gemini(document_text, selected_checkpoints, config)
+        findings = _run_gemini_vision(image_bytes, checkpoints, page_num, config)
     elif provider == "anthropic":
-        findings, prompts = _run_anthropic(document_text, selected_checkpoints, config)
+        findings = _run_anthropic_vision(image_bytes, checkpoints, page_num, config)
     else:
         raise ValueError(
             f"Unsupported provider '{provider}' in config/model_config.yaml. "
@@ -213,4 +212,4 @@ def run_checks(document_text: str, selected_checkpoints: list[dict]) -> tuple[li
         f for f in findings
         if isinstance(f, dict) and required_keys.issubset(f.keys())
     ]
-    return valid, prompts
+    return valid

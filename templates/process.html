@@ -1,0 +1,232 @@
+{% extends "base.html" %}
+
+{% block title %}Processing - Sunny Pillow{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+  <h1 class="text-3xl font-bold text-gray-900 mb-2">{{ title }}</h1>
+  <p class="text-gray-600">Processing document...</p>
+</div>
+
+<div class="grid grid-cols-2 gap-6">
+  <!-- Left column: Page images -->
+  <div class="border border-gray-200 rounded-lg bg-white p-4 shadow-sm">
+    <h2 class="text-lg font-semibold text-gray-900 mb-4">Pages</h2>
+    <div id="pages-container" class="space-y-4 max-h-[600px] overflow-y-auto">
+      <div class="text-center text-gray-500 py-8">
+        <div class="animate-spin inline-block w-6 h-6 border-4 border-indigo-200 border-t-indigo-600 rounded-full"></div>
+        <p class="mt-2">Loading pages...</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right column: Findings -->
+  <div class="border border-gray-200 rounded-lg bg-white p-4 shadow-sm">
+    <h2 class="text-lg font-semibold text-gray-900 mb-4">Findings</h2>
+    <div id="findings-container" class="space-y-3 max-h-[600px] overflow-y-auto">
+      <div class="text-center text-gray-500 py-8">
+        <p>Awaiting findings...</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Footer with action button -->
+<div id="footer" class="mt-6 hidden">
+  <div class="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-lg p-4">
+    <div class="text-sm text-gray-600">
+      <span id="findings-count">0</span> findings ·
+      <span id="selected-count">0</span> selected
+    </div>
+    <button
+      id="insert-button"
+      type="button"
+      class="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+      disabled
+    >
+      Insert selected comments to Drive
+    </button>
+  </div>
+</div>
+
+<script>
+const jobId = "{{ job_id }}";
+let allFindings = [];
+let selectedFindingIds = new Set();
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function updateCounts() {
+  document.getElementById('findings-count').textContent = allFindings.length;
+  document.getElementById('selected-count').textContent = selectedFindingIds.size;
+
+  // Enable insert button only if there are selected findings and no PDFs
+  const insertButton = document.getElementById('insert-button');
+  if (allFindings.length > 0 && selectedFindingIds.size > 0) {
+    insertButton.disabled = false;
+  }
+}
+
+function createFindingElement(finding) {
+  const div = document.createElement('div');
+  div.className = 'border border-gray-200 rounded p-3 text-sm';
+  div.innerHTML = `
+    <div class="flex items-start gap-2">
+      <input
+        type="checkbox"
+        class="mt-1 finding-checkbox"
+        data-finding-id="${finding.id}"
+        checked
+      />
+      <div class="flex-1">
+        <div class="font-semibold text-gray-900">${escapeHtml(finding.checkpoint_id)}</div>
+        <div class="text-xs text-gray-500 mt-1">${escapeHtml(finding.location)}</div>
+        <div class="text-gray-700 mt-2">
+          <div class="font-mono bg-gray-100 px-2 py-1 rounded text-xs mb-2">"${escapeHtml(finding.quote)}"</div>
+          <div><strong>Issue:</strong> ${escapeHtml(finding.issue)}</div>
+          <div><strong>Suggestion:</strong> ${escapeHtml(finding.suggestion)}</div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const checkbox = div.querySelector('.finding-checkbox');
+  checkbox.addEventListener('change', (e) => {
+    if (e.target.checked) {
+      selectedFindingIds.add(finding.id);
+    } else {
+      selectedFindingIds.delete(finding.id);
+    }
+    updateCounts();
+  });
+
+  // Initially selected
+  selectedFindingIds.add(finding.id);
+
+  return div;
+}
+
+function clearContainer(containerId) {
+  const container = document.getElementById(containerId);
+  container.innerHTML = '';
+}
+
+// Open EventSource to stream processing
+const eventSource = new EventSource(`/stream/${jobId}`);
+
+eventSource.addEventListener('start', (event) => {
+  const data = JSON.parse(event.data);
+  console.log(`Processing ${data.total_pages} pages...`);
+  clearContainer('pages-container');
+  clearContainer('findings-container');
+});
+
+eventSource.addEventListener('page_ready', (event) => {
+  const data = JSON.parse(event.data);
+  const { page, total_pages } = data;
+
+  // Add page image container
+  const pageDiv = document.createElement('div');
+  pageDiv.className = 'border border-gray-300 rounded overflow-hidden bg-gray-100';
+  pageDiv.innerHTML = `
+    <div class="relative">
+      <img
+        src="/job/${jobId}/page/${String(page).padStart(3, '0')}"
+        alt="Page ${page}"
+        class="w-full h-auto"
+      />
+      <div class="absolute top-2 right-2 bg-black bg-opacity-50 text-white px-2 py-1 rounded text-xs">
+        ${page} / ${total_pages}
+      </div>
+    </div>
+  `;
+
+  document.getElementById('pages-container').appendChild(pageDiv);
+});
+
+eventSource.addEventListener('page_findings', (event) => {
+  const data = JSON.parse(event.data);
+  const { page, findings } = data;
+
+  if (findings.length === 0) {
+    return;
+  }
+
+  // Add findings to the list
+  for (const finding of findings) {
+    allFindings.push(finding);
+    const findingElement = createFindingElement(finding);
+    document.getElementById('findings-container').appendChild(findingElement);
+  }
+
+  updateCounts();
+});
+
+eventSource.addEventListener('done', (event) => {
+  const data = JSON.parse(event.data);
+  console.log(`Processing complete. ${data.total_findings} total findings.`);
+
+  // Show footer with action button
+  document.getElementById('footer').classList.remove('hidden');
+
+  // If no findings, show message
+  if (allFindings.length === 0) {
+    document.getElementById('findings-container').innerHTML = '<div class="text-center text-gray-500 py-8">No issues found!</div>';
+  }
+
+  eventSource.close();
+});
+
+eventSource.addEventListener('error', (event) => {
+  const data = JSON.parse(event.data);
+  console.error('Processing error:', data.message);
+
+  const container = document.getElementById('findings-container');
+  container.innerHTML = `
+    <div class="border border-red-200 bg-red-50 rounded p-4 text-red-800">
+      <strong>Error:</strong> ${escapeHtml(data.message)}
+    </div>
+  `;
+
+  eventSource.close();
+});
+
+// Insert button handler
+document.getElementById('insert-button').addEventListener('click', async () => {
+  const button = document.getElementById('insert-button');
+  button.disabled = true;
+  button.textContent = 'Inserting...';
+
+  const formData = new FormData();
+  for (const id of selectedFindingIds) {
+    formData.append('finding_ids', String(id));
+  }
+
+  try {
+    const response = await fetch(`/insert-comments/${jobId}`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    const result = await response.json();
+
+    if (result.error) {
+      alert(`Error: ${result.error}`);
+    } else {
+      alert(`Successfully inserted ${result.posted} comments to Drive!`);
+      // Optionally redirect back to home
+      // window.location.href = '/';
+    }
+  } catch (error) {
+    alert(`Error inserting comments: ${error.message}`);
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Insert selected comments to Drive';
+  }
+});
+</script>
+{% endblock %}

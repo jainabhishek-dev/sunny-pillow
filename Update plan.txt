@@ -1,0 +1,261 @@
+# Plan: House Style Editorial Checker (Sunny Pillow) — Vision Rewrite
+
+## Context
+The original text-extraction approach (Docs API → plain text → LLM) proved unreliable: the AI received 300+ lines of stripped text with no formatting context, causing false positives and missed errors. The fix is to switch to a **vision-based pipeline**: export the Drive file as PDF, render each page as an image, and send one page at a time to a vision-capable AI. This gives the AI exactly what the editor sees — bold, italic, font size, colour, layout — and naturally chunks the document into focused, page-sized units.
+
+Additionally, the old approach auto-posted all findings as Drive comments. The new approach shows findings live in a two-column UI and lets the editor **choose which findings to insert** as Drive comments.
+
+---
+
+## Architecture
+
+| Layer | Choice | Reason |
+|---|---|---|
+| Backend | Python + FastAPI | Existing; supports async SSE natively via `StreamingResponse` |
+| Frontend | Jinja2 + Tailwind CSS | Existing; new two-column live page added |
+| Hosting | Render.com (free tier) | Existing; SSE keeps connection open fine |
+| AI | Gemini 2.5 Flash (vision) | Accepts image input, fast, cheap; Claude vision also supported via config |
+| PDF rendering | PyMuPDF (`pymupdf`) | No system dependencies, works on Linux/Render, renders one page at a time |
+| Image storage | Server `/tmp` + route serving | Store JPEG files in `/tmp/sunny_pillow_jobs/{job_id}/`; serve via `GET /job/{job_id}/page/{n}`. Keeps stream lightweight, enables lazy-loading and parallel downloads. Auto-cleanup via Render ephemeral `/tmp`. |
+| Streaming | FastAPI `StreamingResponse` (SSE) | Built-in, no extra dependency |
+| Auth | Per-user Google OAuth 2.0 (Authlib) | Unchanged — token used for Drive export + comment insertion |
+| Comment insertion | Manual — user selects findings in UI, clicks Insert | Drive API posts selected comments under user's own name |
+
+---
+
+## New User Flow
+
+1. Sign in with Google (unchanged)
+2. Paste a Google Drive link (Doc, Slides, or PDF)
+3. Select checkpoints (unchanged)
+4. Click **Run Check** → redirected to a **live two-column processing page**
+5. Left column: page images appear one by one as they are rendered
+6. Right column: AI findings for each page appear as each page is processed
+7. After all pages done: each finding shows a **checkbox** (checked by default)
+8. Editor reviews, unchecks any false positives
+9. Clicks **Insert selected comments to Drive** → selected findings posted as Drive comments under editor's name
+10. Success count shown
+
+---
+
+## Pipeline (per run)
+
+```
+POST /check
+  → validate input
+  → create job (job.json in /tmp/sunny_pillow_jobs/{job_id}/)
+  → redirect 303 to GET /process/{job_id}
+
+GET /process/{job_id}
+  → serve process.html (two-column UI)
+  → browser immediately opens EventSource('/stream/{job_id}')
+
+GET /stream/{job_id}   [SSE endpoint]
+  → export Drive file as PDF bytes (Drive API)
+  → open PDF with PyMuPDF
+  → for each page (1 to N):
+      render page → JPEG bytes (2× zoom for readability)
+      save to /tmp/.../page_{n:03d}.jpg
+      SSE → "page_ready" {page, total_pages}
+      call vision AI with image + all selected checkpoints
+      SSE → "page_findings" {page, findings[]}
+  → save all findings to findings.json
+  → SSE → "done" {total_findings}
+
+GET /job/{job_id}/page/{page_num}
+  → serve the JPEG from /tmp (browser loads this in the img tag)
+
+POST /insert-comments/{job_id}
+  → body: {finding_ids: [0, 2, 5, ...]}
+  → read findings.json, post selected ones to Drive
+  → return {posted, failed}
+```
+
+---
+
+## SSE Event Schema
+
+```
+event: start
+data: {"total_pages": 30, "title": "Chapter 1 – Large Numbers"}
+
+event: page_ready
+data: {"page": 1, "total_pages": 30}
+
+event: page_findings
+data: {"page": 1, "findings": [{"id": 0, "checkpoint_id": "cp_004", "quote": "...", "location": "Page 1", "issue": "...", "suggestion": "..."}]}
+
+event: done
+data: {"total_findings": 42}
+
+event: error
+data: {"message": "Could not export file as PDF. Check Drive permissions."}
+```
+
+---
+
+## Vision AI Prompt (per page)
+
+```
+You are a professional editorial checker for LEAD, an educational publishing house.
+
+Check the document page image provided against ONLY these style rules:
+{numbered list of selected checkpoint descriptions}
+
+INSTRUCTIONS:
+- Read the page image carefully.
+- For each rule, flag EVERY violation you can see.
+- Quote exact text from the page (20–80 characters).
+- Keep issue and suggestion fields to 15 words or fewer each.
+- Return a JSON array only. No markdown, no explanation.
+
+Schema:
+[{"checkpoint_id": "cp_001", "quote": "...", "location": "Page {N}", "issue": "...", "suggestion": "..."}]
+
+Return [] if no violations found on this page.
+```
+
+All selected checkpoints are sent in every page call — no batching needed since the page image is already a small, focused unit.
+
+---
+
+## Job Storage (temp files)
+
+```
+/tmp/sunny_pillow_jobs/{job_id}/
+  job.json          → {file_id, file_type, title, checkpoint_ids, status}
+  page_001.jpg      → rendered page image (JPEG, ~400KB each at 2× zoom)
+  page_002.jpg
+  ...
+  page_N.jpg
+  findings.json     → [{id, checkpoint_id, quote, location, issue, suggestion}, ...]
+```
+
+**Image Delivery:**
+- Browser loads images lazily via `<img src="/job/{job_id}/page/{n}">` as pages are needed (user scrolls)
+- Parallel downloads: browser fetches multiple pages simultaneously over HTTP/2
+- SSE stream stays lightweight (only metadata in events)
+- Auto-cleanup: Render's ephemeral `/tmp` resets on each deploy; for long-running instances, delete folder after user reviews findings or after 24 hours
+
+**Token Storage:**
+Token is NOT stored in the job file — it is read from the session cookie on each request (safer, per-user isolation).
+
+---
+
+## Comment Insertion (selective, post-review)
+
+- Only called when user explicitly clicks "Insert selected comments"
+- All comments are **unanchored** (no character offset) — Drive shows them as general file comments
+- Comment format:
+  ```
+  [cp_004] Oxford comma
+  Page 3
+  Quoted text: "cats, dogs and fish"
+  Issue: Missing serial comma before 'and'
+  Suggestion: Change to 'cats, dogs, and fish'
+  ```
+- Google Docs: unanchored `comments.create`
+- Google Slides: file-level `comments.create`
+- PDF: not supported — findings shown in UI only, insert button hidden for PDFs
+
+---
+
+## Files Changed
+
+### `reader.py` — Complete rewrite (simplified)
+**Before:** Extracted text via Docs/Slides API, built `sections`, `full_text`, `text_runs`
+**After:** Only exports the file as PDF bytes. Returns `{file_id, title, file_type, pdf_bytes}`.
+
+```python
+def get_file_as_pdf(token, drive_url) -> dict:
+    # Extract file_id, get metadata (type, title)
+    # Drive API: export as PDF for Doc/Slides, download directly for PDF
+    # Return: {file_id, title, file_type, pdf_bytes}
+```
+
+### `checker.py` — Complete rewrite (vision)
+**Before:** Built text prompt with full document, sent batches of 3 checkpoints
+**After:** Accepts a single JPEG image bytes + all selected checkpoints. Returns findings for that page.
+
+```python
+def run_vision_check(image_bytes: bytes, checkpoints: list[dict], page_num: int) -> list[dict]:
+    # Build vision prompt
+    # Gemini: genai.GenerativeModel.generate_content([prompt, PIL.Image])
+    # Anthropic: messages.create with image content block (base64 JPEG)
+    # Parse and return findings
+```
+
+### `commenter.py` — Simplified
+**Before:** Attempted text anchoring via character offsets (`text_runs`), complex fallback logic
+**After:** Always posts unanchored comments. Remove `_find_doc_offset`, `_pick_anchor_text`, `post_test_comment`, `text_runs` logic. Keep `_format_comment`, `_add_comment_to_doc` (unanchored), `_add_comment_to_slides`, `post_selected_comments(token, file_data, selected_findings, checkpoint_map)`.
+
+### `main.py` — New routes added, old `/check` + `/results` replaced
+
+| Route | Change |
+|---|---|
+| `POST /check` | Validates → creates job → redirects to `/process/{job_id}` |
+| `GET /process/{job_id}` | Serves `process.html` |
+| `GET /stream/{job_id}` | SSE: exports PDF, renders pages, calls vision AI, streams events |
+| `GET /job/{job_id}/page/{n}` | Serves JPEG from temp storage |
+| `POST /insert-comments/{job_id}` | Posts selected findings to Drive |
+| `GET /results/{result_id}` | **Removed** (replaced by `/process/{job_id}`) |
+| `_results_store` / `_save_result` / `_load_result` | **Removed** (replaced by job file storage) |
+
+### `templates/process.html` — New file
+Two-column layout:
+- **Left column:** page images load progressively via `<img src="/job/{id}/page/{n}">` as `page_ready` events arrive. Current page shows a spinner.
+- **Right column:** findings per page appear as `page_findings` events arrive. Each finding has a checkbox (checked by default).
+- **Footer (after `done` event):** "42 findings · 42 selected" counter + "Insert selected comments to Drive" button. Hidden for PDFs.
+- JavaScript: opens `EventSource`, handles all event types, updates DOM live.
+
+### `templates/results.html` — Removed
+No longer needed. The process page replaces it.
+
+### `templates/index.html` — Minor
+Remove any remaining references to "line numbers" in helper text. No structural change.
+
+### `requirements.txt` — Add one dependency
+```
+pymupdf==1.24.11   # PDF → page images, no system dependencies
+```
+
+### `config/model_config.yaml` — Update
+Remove `batch_size` (no longer batching checkpoints — all go in every page call).
+Add note that vision-capable model is required.
+
+### Unchanged files
+`auth.py`, `templates/base.html`, `templates/login.html`, `static/style.css`, `checkpoints.yaml`, `render.yaml`, `runtime.txt`, `.gitignore`, `.env.example`
+
+---
+
+## Implementation Order
+
+1. `requirements.txt` — add `pymupdf==1.24.11` first (needed for testing `reader.py`)
+2. `reader.py` — rewrite to PDF export only; test with a Doc, Slides, and PDF link
+3. `checker.py` — rewrite for vision; test one page image against a few checkpoints
+4. `main.py` — add:
+   - Job storage helpers (`_ensure_job_dir`, `_save_job`, `_load_job`)
+   - `POST /check` — validate input, create job, redirect to `/process/{job_id}`
+   - `GET /process/{job_id}` — serve `process.html`
+   - `GET /stream/{job_id}` — SSE endpoint (exports PDF, renders pages, calls vision AI)
+   - `GET /job/{job_id}/page/{n}` — serve JPEG from disk (3-line route using `FileResponse`)
+   - `POST /insert-comments/{job_id}` — insert selected findings to Drive
+   - Remove old `/results/{result_id}` route and result store helpers
+5. `commenter.py` — simplify: remove anchoring logic, add `post_selected_comments()`
+6. `templates/process.html` — new file with two-column SSE-driven UI
+7. `templates/index.html` — minor cleanup (remove "line numbers" references if present)
+8. Remove `templates/results.html`
+9. `config/model_config.yaml` — remove `batch_size` key, add comment about vision requirement
+
+---
+
+## Verification
+
+1. Run locally, sign in, paste a Google Doc link with known style violations
+2. Confirm: page images appear left, findings populate right as pages process
+3. Uncheck one finding, click Insert → confirm correct number of comments in Drive
+4. Test with a Google Slides link — findings appear, insert works
+5. Test with a PDF link — findings appear, Insert button is hidden
+6. Test with an unsupported file type — clear error message shown
+7. Refresh the `/process/{job_id}` page mid-run — stream reconnects and continues
+8. Switch `model_config.yaml` to `anthropic` — verify same findings from Claude vision

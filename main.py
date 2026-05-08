@@ -9,16 +9,16 @@ from typing import Annotated
 
 import yaml
 from dotenv import load_dotenv
-from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import FastAPI, Form, Request, HTTPException
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 import auth
-from checker import run_checks
-from commenter import post_comments
-from reader import get_file_content
+from checker import run_vision_check
+from commenter import post_selected_comments
+from reader import get_file_as_pdf, get_pdf_bytes_by_id
 
 load_dotenv()
 
@@ -36,20 +36,28 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
-# File-based store for check results — keyed by a short UUID.
-# Using temp files instead of an in-memory dict so that results survive
-# uvicorn --reload restarts (which wipe module-level state).
-_RESULTS_DIR = Path(tempfile.gettempdir()) / "sunny_pillow_results"
-_RESULTS_DIR.mkdir(exist_ok=True)
+# Job storage directory
+_JOBS_DIR = Path(tempfile.gettempdir()) / "sunny_pillow_jobs"
+_JOBS_DIR.mkdir(exist_ok=True)
 
 
-def _save_result(result_id: str, data: dict) -> None:
-    path = _RESULTS_DIR / f"{result_id}.json"
-    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+def _ensure_job_dir(job_id: str) -> Path:
+    """Create and return the job directory."""
+    job_dir = _JOBS_DIR / job_id
+    job_dir.mkdir(exist_ok=True)
+    return job_dir
 
 
-def _load_result(result_id: str) -> dict | None:
-    path = _RESULTS_DIR / f"{result_id}.json"
+def _save_job(job_id: str, data: dict) -> None:
+    """Save job metadata to job.json."""
+    job_dir = _ensure_job_dir(job_id)
+    (job_dir / "job.json").write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+
+def _load_job(job_id: str) -> dict | None:
+    """Load job metadata from job.json."""
+    job_dir = _JOBS_DIR / job_id
+    path = job_dir / "job.json"
     if path.exists():
         return json.loads(path.read_text(encoding="utf-8"))
     return None
@@ -125,6 +133,7 @@ async def run_check(
     drive_url: Annotated[str, Form()],
     checkpoint_ids: Annotated[list[str], Form()] = [],
 ):
+    """Validate input and create a job, then redirect to the processing page."""
     user = auth.get_current_user(request)
     token = auth.get_token(request)
 
@@ -153,11 +162,11 @@ async def run_check(
         CHECKPOINT_MAP[cid] for cid in checkpoint_ids if cid in CHECKPOINT_MAP
     ]
 
+    # Try to get file metadata (to validate the URL early)
     loop = asyncio.get_running_loop()
-
     try:
         file_data = await loop.run_in_executor(
-            None, partial(get_file_content, token, drive_url.strip())
+            None, partial(get_file_as_pdf, token, drive_url.strip())
         )
     except ValueError as exc:
         return templates.TemplateResponse("index.html", {
@@ -178,57 +187,212 @@ async def run_check(
             "error": f"Could not read the file: {error_msg}",
         })
 
-    try:
-        findings, prompts = await loop.run_in_executor(
-            None, partial(run_checks, file_data["full_text"], selected_checkpoints)
-        )
-    except Exception as exc:
-        return templates.TemplateResponse("index.html", {
-            "request": request,
-            "user": user,
-            "categories": CATEGORIES,
-            "error": f"AI check failed: {str(exc)}",
-        })
-
-    comments_posted = 0
-    comment_error = None
-
-    if file_data["type"] != "pdf" and findings:
-        try:
-            comments_posted = await loop.run_in_executor(
-                None, partial(post_comments, token, file_data, findings, CHECKPOINT_MAP)
-            )
-        except Exception as exc:
-            comment_error = (
-                f"Findings were detected but comments could not be posted to Drive: {str(exc)}"
-            )
-
-    result_id = uuid.uuid4().hex
-    _save_result(result_id, {
-        "user": user,
-        "file_title": file_data["title"],
-        "file_type": file_data["type"],
-        "findings": findings,
-        "prompts": prompts,
-        "comments_posted": comments_posted,
-        "comment_error": comment_error,
-        "is_pdf": file_data["type"] == "pdf",
+    # Create a job and save metadata
+    job_id = uuid.uuid4().hex
+    _save_job(job_id, {
+        "file_id": file_data["file_id"],
+        "file_type": file_data["file_type"],
+        "title": file_data["title"],
+        "checkpoint_ids": [cp["id"] for cp in selected_checkpoints],
+        "status": "processing",
     })
-    return RedirectResponse(url=f"/results/{result_id}", status_code=303)
+
+    # Redirect to the processing page
+    return RedirectResponse(url=f"/process/{job_id}", status_code=303)
 
 
-@app.get("/results/{result_id}", response_class=HTMLResponse)
-async def show_results(request: Request, result_id: str):
+@app.get("/process/{job_id}", response_class=HTMLResponse)
+async def show_process(request: Request, job_id: str):
+    """Serve the live processing page with two-column layout."""
     user = auth.get_current_user(request)
     if not user:
         return RedirectResponse(url="/login")
 
-    result = _load_result(result_id)
-    if not result:
-        return RedirectResponse(url="/?error=Results+not+found.+Please+run+a+new+check.")
+    job = _load_job(job_id)
+    if not job:
+        return RedirectResponse(url="/?error=Job+not+found.+Please+run+a+new+check.")
 
-    return templates.TemplateResponse("results.html", {
+    return templates.TemplateResponse("process.html", {
         "request": request,
-        **result,
-        "checkpoint_map": CHECKPOINT_MAP,
+        "user": user,
+        "job_id": job_id,
+        "title": job["title"],
     })
+
+
+async def _stream_processing(job_id: str, token: dict) -> None:
+    """
+    SSE endpoint that processes a PDF page-by-page.
+    Renders images, calls vision AI, and streams results.
+    """
+    import fitz  # PyMuPDF
+    from io import BytesIO
+
+    job = _load_job(job_id)
+    if not job:
+        yield f"event: error\ndata: {json.dumps({'message': 'Job not found'})}\n\n"
+        return
+
+    loop = asyncio.get_running_loop()
+
+    # Get the PDF bytes using file_id from the job
+    try:
+        pdf_data = await loop.run_in_executor(
+            None, partial(get_pdf_bytes_by_id, token, job["file_id"])
+        )
+        pdf_bytes = pdf_data.get("pdf_bytes")
+        if not pdf_bytes:
+            raise ValueError("No PDF bytes retrieved")
+    except Exception as e:
+        yield f"event: error\ndata: {json.dumps({'message': f'Could not export file as PDF: {str(e)}'})}\n\n"
+        return
+
+    # Open PDF with PyMuPDF
+    try:
+        pdf_document = fitz.open(stream=BytesIO(pdf_bytes), filetype="pdf")
+    except Exception as e:
+        yield f"event: error\ndata: {json.dumps({'message': f'Could not parse PDF: {str(e)}'})}\n\n"
+        return
+
+    total_pages = len(pdf_document)
+    job_dir = _ensure_job_dir(job_id)
+    all_findings = []
+    finding_id_counter = 0
+
+    # Send start event
+    yield f"event: start\ndata: {json.dumps({'total_pages': total_pages, 'title': job['title']})}\n\n"
+
+    # Get selected checkpoints
+    selected_checkpoints = [
+        CHECKPOINT_MAP[cid] for cid in job["checkpoint_ids"] if cid in CHECKPOINT_MAP
+    ]
+
+    # Process each page
+    for page_num in range(1, total_pages + 1):
+        try:
+            # Render page to image (2× zoom for readability)
+            page = pdf_document[page_num - 1]
+            mat = fitz.Matrix(2, 2)  # 2× zoom
+            pix = page.get_pixmap(matrix=mat, alpha=False)
+            img_bytes = pix.tobytes(output="jpeg")
+
+            # Save image to disk
+            img_path = job_dir / f"page_{page_num:03d}.jpg"
+            img_path.write_bytes(img_bytes)
+
+            # Send page_ready event
+            yield f"event: page_ready\ndata: {json.dumps({'page': page_num, 'total_pages': total_pages})}\n\n"
+
+            # Call vision AI in executor (blocking operation)
+            findings = await loop.run_in_executor(
+                None, partial(run_vision_check, img_bytes, selected_checkpoints, page_num)
+            )
+
+            # Assign finding IDs and add page reference
+            for finding in findings:
+                finding["id"] = finding_id_counter
+                if "location" not in finding or finding["location"] == "":
+                    finding["location"] = f"Page {page_num}"
+                all_findings.append(finding)
+                finding_id_counter += 1
+
+            # Send page_findings event
+            yield f"event: page_findings\ndata: {json.dumps({'page': page_num, 'findings': findings})}\n\n"
+
+        except Exception as e:
+            yield f"event: error\ndata: {json.dumps({'message': f'Error processing page {page_num}: {str(e)}'})}\n\n"
+            continue
+
+    # Save findings to findings.json
+    try:
+        (job_dir / "findings.json").write_text(
+            json.dumps(all_findings, ensure_ascii=False),
+            encoding="utf-8"
+        )
+    except Exception as e:
+        yield f"event: error\ndata: {json.dumps({'message': f'Could not save findings: {str(e)}'})}\n\n"
+
+    # Send done event
+    yield f"event: done\ndata: {json.dumps({'total_findings': len(all_findings)})}\n\n"
+
+    # Update job status
+    job["status"] = "completed"
+    _save_job(job_id, job)
+
+
+@app.get("/stream/{job_id}")
+async def stream_processing(request: Request, job_id: str):
+    """SSE endpoint for streaming page processing."""
+    user = auth.get_current_user(request)
+    token = auth.get_token(request)
+
+    if not user or not token:
+        return RedirectResponse(url="/login")
+
+    return StreamingResponse(
+        _stream_processing(job_id, token),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        }
+    )
+
+
+@app.get("/job/{job_id}/page/{page_num:int}")
+async def serve_page_image(job_id: str, page_num: int):
+    """Serve a rendered page image (JPEG) from disk."""
+    job_dir = _JOBS_DIR / job_id
+    page_file = job_dir / f"page_{page_num:03d}.jpg"
+
+    if not page_file.exists():
+        raise HTTPException(status_code=404, detail="Page image not found")
+
+    return FileResponse(page_file, media_type="image/jpeg")
+
+
+@app.post("/insert-comments/{job_id}")
+async def insert_comments(
+    request: Request,
+    job_id: str,
+    finding_ids: Annotated[list[str], Form()] = [],
+):
+    """Insert selected findings as Drive comments."""
+    user = auth.get_current_user(request)
+    token = auth.get_token(request)
+
+    if not user or not token:
+        return RedirectResponse(url="/login", status_code=303)
+
+    job = _load_job(job_id)
+    if not job:
+        return {"error": "Job not found"}
+
+    # Load findings
+    job_dir = _JOBS_DIR / job_id
+    findings_file = job_dir / "findings.json"
+    if not findings_file.exists():
+        return {"error": "Findings not found"}
+
+    all_findings = json.loads(findings_file.read_text(encoding="utf-8"))
+
+    # Filter to selected finding IDs
+    selected_finding_ids = [int(fid) for fid in finding_ids if fid.isdigit()]
+    selected_findings = [f for f in all_findings if f.get("id") in selected_finding_ids]
+
+    # Prepare file data (needed by post_selected_comments)
+    file_data = {
+        "file_id": job["file_id"],
+        "type": job["file_type"],
+        "title": job["title"],
+    }
+
+    # Post comments in executor
+    loop = asyncio.get_running_loop()
+    try:
+        posted = await loop.run_in_executor(
+            None, partial(post_selected_comments, token, file_data, selected_findings, CHECKPOINT_MAP)
+        )
+        return {"posted": posted, "total_selected": len(selected_findings)}
+    except Exception as exc:
+        return {"error": f"Could not post comments: {str(exc)}"}
