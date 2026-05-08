@@ -60,7 +60,7 @@ def _get_pdf_bytes_by_id(file_id: str, file_type: str, drive_service) -> bytes:
         # Download PDF directly
         pdf_bytes = (
             drive_service.files()
-            .get_media(fileId=file_id, supportsAllDrives=True)
+            .get_media(fileId=file_id)
             .execute()
         )
     return pdf_bytes
