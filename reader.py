@@ -53,7 +53,7 @@ def _get_pdf_bytes_by_id(file_id: str, file_type: str, drive_service) -> bytes:
         # Export Docs/Slides as PDF
         pdf_bytes = (
             drive_service.files()
-            .export(fileId=file_id, mimeType="application/pdf", supportsAllDrives=True)
+            .export(fileId=file_id, mimeType="application/pdf")
             .execute()
         )
     else:  # file_type == "pdf"
