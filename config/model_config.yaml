@@ -3,14 +3,14 @@
 # NOTE: Both providers must support vision (image input) for the current architecture.
 
 # Supported providers: gemini | anthropic
-provider: anthropic
+provider: gemini
 
 # Gemini vision models: gemini-2.0-flash | gemini-2.5-flash (must support vision)
 # Anthropic vision models: claude-sonnet-4-6 | claude-opus-4-7 (must support vision)
-model: claude-haiku-4-5-20251001
+model: gemini-3-flash-preview
 
 # Name of the environment variable that holds the API key for the chosen provider.
-api_key_env: ANTHROPIC_API_KEY
+api_key_env: GEMINI_API_KEY
 
 # Keep low for deterministic, rule-following output.
 temperature: 0.1
