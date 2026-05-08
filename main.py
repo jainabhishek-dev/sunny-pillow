@@ -202,8 +202,8 @@ async def run_check(
 
 
 @app.get("/process/{job_id}", response_class=HTMLResponse)
-async def show_process(request: Request, job_id: str):
-    """Serve the live processing page with two-column layout."""
+async def show_process(request: Request, job_id: str, retry_from: int = None):
+    """Serve the live processing page with card-based layout."""
     user = auth.get_current_user(request)
     if not user:
         return RedirectResponse(url="/login")
@@ -217,13 +217,19 @@ async def show_process(request: Request, job_id: str):
         "user": user,
         "job_id": job_id,
         "title": job["title"],
+        "retry_from": retry_from,
     })
 
 
-async def _stream_processing(job_id: str, token: dict) -> None:
+async def _stream_processing(job_id: str, token: dict, retry_from: int = None) -> None:
     """
     SSE endpoint that processes a PDF page-by-page.
     Renders images, calls vision AI, and streams results.
+
+    Args:
+        job_id: The job ID
+        token: User's OAuth token
+        retry_from: Optional page number to resume from (for error recovery)
     """
     import fitz  # PyMuPDF
     from io import BytesIO
@@ -234,33 +240,62 @@ async def _stream_processing(job_id: str, token: dict) -> None:
         return
 
     loop = asyncio.get_running_loop()
-
-    # Get the PDF bytes using file_id from the job
-    try:
-        pdf_data = await loop.run_in_executor(
-            None, partial(get_pdf_bytes_by_id, token, job["file_id"])
-        )
-        pdf_bytes = pdf_data.get("pdf_bytes")
-        if not pdf_bytes:
-            raise ValueError("No PDF bytes retrieved")
-    except Exception as e:
-        yield f"event: error\ndata: {json.dumps({'message': f'Could not export file as PDF: {str(e)}'})}\n\n"
-        return
-
-    # Open PDF with PyMuPDF
-    try:
-        pdf_document = fitz.open(stream=BytesIO(pdf_bytes), filetype="pdf")
-    except Exception as e:
-        yield f"event: error\ndata: {json.dumps({'message': f'Could not parse PDF: {str(e)}'})}\n\n"
-        return
-
-    total_pages = len(pdf_document)
     job_dir = _ensure_job_dir(job_id)
-    all_findings = []
-    finding_id_counter = 0
 
-    # Send start event
-    yield f"event: start\ndata: {json.dumps({'total_pages': total_pages, 'title': job['title']})}\n\n"
+    # If not retrying, get PDF; if retrying, use existing job state
+    if retry_from is None:
+        # Get the PDF bytes using file_id from the job
+        try:
+            pdf_data = await loop.run_in_executor(
+                None, partial(get_pdf_bytes_by_id, token, job["file_id"])
+            )
+            pdf_bytes = pdf_data.get("pdf_bytes")
+            if not pdf_bytes:
+                raise ValueError("No PDF bytes retrieved")
+        except Exception as e:
+            yield f"event: error\ndata: {json.dumps({'message': f'Could not export file as PDF: {str(e)}'})}\n\n"
+            return
+
+        # Open PDF with PyMuPDF
+        try:
+            pdf_document = fitz.open(stream=BytesIO(pdf_bytes), filetype="pdf")
+        except Exception as e:
+            yield f"event: error\ndata: {json.dumps({'message': f'Could not parse PDF: {str(e)}'})}\n\n"
+            return
+
+        total_pages = len(pdf_document)
+        all_findings = []
+        finding_id_counter = 0
+        start_page = 1
+
+        # Send start event
+        yield f"event: start\ndata: {json.dumps({'total_pages': total_pages, 'title': job['title']})}\n\n"
+    else:
+        # Retry mode: load existing PDF and findings
+        try:
+            pdf_data = await loop.run_in_executor(
+                None, partial(get_pdf_bytes_by_id, token, job["file_id"])
+            )
+            pdf_bytes = pdf_data.get("pdf_bytes")
+            pdf_document = fitz.open(stream=BytesIO(pdf_bytes), filetype="pdf")
+        except Exception as e:
+            yield f"event: error\ndata: {json.dumps({'message': f'Could not re-open PDF: {str(e)}'})}\n\n"
+            return
+
+        total_pages = len(pdf_document)
+        start_page = retry_from
+
+        # Load existing findings
+        findings_file = job_dir / "findings.json"
+        if findings_file.exists():
+            all_findings = json.loads(findings_file.read_text(encoding="utf-8"))
+            finding_id_counter = max([f.get("id", 0) for f in all_findings] + [0]) + 1
+        else:
+            all_findings = []
+            finding_id_counter = 0
+
+        # Send retry_start event
+        yield f"event: retry_start\ndata: {json.dumps({'starting_page': start_page, 'total_pages': total_pages})}\n\n"
 
     # Get selected checkpoints
     selected_checkpoints = [
@@ -268,7 +303,7 @@ async def _stream_processing(job_id: str, token: dict) -> None:
     ]
 
     # Process each page
-    for page_num in range(1, total_pages + 1):
+    for page_num in range(start_page, total_pages + 1):
         try:
             # Render page to image (2× zoom for readability)
             page = pdf_document[page_num - 1]
@@ -300,8 +335,28 @@ async def _stream_processing(job_id: str, token: dict) -> None:
             yield f"event: page_findings\ndata: {json.dumps({'page': page_num, 'findings': findings})}\n\n"
 
         except Exception as e:
-            yield f"event: error\ndata: {json.dumps({'message': f'Error processing page {page_num}: {str(e)}'})}\n\n"
-            continue
+            # On error: save state, send partial_complete event, and stop processing
+            job["last_successful_page"] = page_num - 1
+            _save_job(job_id, job)
+
+            # Save findings accumulated so far
+            try:
+                (job_dir / "findings.json").write_text(
+                    json.dumps(all_findings, ensure_ascii=False),
+                    encoding="utf-8"
+                )
+            except Exception as save_error:
+                yield f"event: error\ndata: {json.dumps({'message': f'Could not save findings: {str(save_error)}'})}\n\n"
+
+            # Send partial_complete event with retry info
+            yield f"event: partial_complete\ndata: {json.dumps({
+                'last_successful_page': page_num - 1,
+                'total_pages': total_pages,
+                'error_message': str(e)
+            })}\n\n"
+
+            # Stop processing
+            return
 
     # Save findings to findings.json
     try:
@@ -317,11 +372,12 @@ async def _stream_processing(job_id: str, token: dict) -> None:
 
     # Update job status
     job["status"] = "completed"
+    job.pop("last_successful_page", None)  # Clear retry state on success
     _save_job(job_id, job)
 
 
 @app.get("/stream/{job_id}")
-async def stream_processing(request: Request, job_id: str):
+async def stream_processing(request: Request, job_id: str, retry_from: int = None):
     """SSE endpoint for streaming page processing."""
     user = auth.get_current_user(request)
     token = auth.get_token(request)
@@ -330,7 +386,7 @@ async def stream_processing(request: Request, job_id: str):
         return RedirectResponse(url="/login")
 
     return StreamingResponse(
-        _stream_processing(job_id, token),
+        _stream_processing(job_id, token, retry_from),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -349,6 +405,29 @@ async def serve_page_image(job_id: str, page_num: int):
         raise HTTPException(status_code=404, detail="Page image not found")
 
     return FileResponse(page_file, media_type="image/jpeg")
+
+
+@app.post("/retry-check/{job_id}")
+async def retry_check(request: Request, job_id: str):
+    """Initiate retry of processing from the last failed page."""
+    user = auth.get_current_user(request)
+    token = auth.get_token(request)
+
+    if not user or not token:
+        return RedirectResponse(url="/login", status_code=303)
+
+    job = _load_job(job_id)
+    if not job:
+        return RedirectResponse(url="/?error=Job+not+found.", status_code=303)
+
+    # Get the last successful page from job metadata
+    from_page = job.get("last_successful_page", 0) + 1
+
+    # Redirect to process page with retry flag
+    return RedirectResponse(
+        url=f"/process/{job_id}?retry_from={from_page}",
+        status_code=303
+    )
 
 
 @app.post("/insert-comments/{job_id}")

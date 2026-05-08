@@ -8,51 +8,51 @@
   <p class="text-gray-600">Processing document...</p>
 </div>
 
-<div class="grid grid-cols-2 gap-6">
-  <!-- Left column: Page images -->
-  <div class="border border-gray-200 rounded-lg bg-white p-4 shadow-sm">
-    <h2 class="text-lg font-semibold text-gray-900 mb-4">Pages</h2>
-    <div id="pages-container" class="space-y-4 max-h-[600px] overflow-y-auto">
-      <div class="text-center text-gray-500 py-8">
-        <div class="animate-spin inline-block w-6 h-6 border-4 border-indigo-200 border-t-indigo-600 rounded-full"></div>
-        <p class="mt-2">Loading pages...</p>
-      </div>
-    </div>
-  </div>
-
-  <!-- Right column: Findings -->
-  <div class="border border-gray-200 rounded-lg bg-white p-4 shadow-sm">
-    <h2 class="text-lg font-semibold text-gray-900 mb-4">Findings</h2>
-    <div id="findings-container" class="space-y-3 max-h-[600px] overflow-y-auto">
-      <div class="text-center text-gray-500 py-8">
-        <p>Awaiting findings...</p>
-      </div>
-    </div>
+<!-- Cards container: one card per page with image + findings side-by-side -->
+<div id="pages-container" class="space-y-4">
+  <div class="border border-gray-200 rounded-lg bg-white p-4 shadow-sm text-center text-gray-500 py-8">
+    <div class="animate-spin inline-block w-6 h-6 border-4 border-indigo-200 border-t-indigo-600 rounded-full mx-auto"></div>
+    <p class="mt-2">Loading pages...</p>
   </div>
 </div>
 
-<!-- Footer with action button -->
+<!-- Footer with action button (shown on first finding) -->
 <div id="footer" class="mt-6 hidden">
   <div class="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-lg p-4">
     <div class="text-sm text-gray-600">
       <span id="findings-count">0</span> findings ·
       <span id="selected-count">0</span> selected
     </div>
-    <button
-      id="insert-button"
-      type="button"
-      class="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
-      disabled
-    >
-      Insert selected comments to Drive
-    </button>
+    <div class="flex gap-2">
+      <button
+        id="retry-button"
+        type="button"
+        class="hidden px-4 py-2 bg-gray-600 text-white text-sm font-medium rounded-lg hover:bg-gray-700 transition"
+      >
+        Retry from page <span id="retry-page-num">0</span>
+      </button>
+      <button
+        id="insert-button"
+        type="button"
+        class="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+        disabled
+      >
+        Insert selected comments to Drive
+      </button>
+    </div>
   </div>
 </div>
 
+<!-- Error message display -->
+<div id="error-message" class="hidden mt-6 border border-red-200 bg-red-50 rounded-lg p-4 text-red-800"></div>
+
 <script>
 const jobId = "{{ job_id }}";
-let allFindings = [];
+let pageFindings = {};  // {1: [...], 2: [...], ...}
+let allFindingsFlat = [];  // flat list for counting
 let selectedFindingIds = new Set();
+let totalPages = 0;
+let isPartialMode = false;
 
 function escapeHtml(text) {
   const div = document.createElement('div');
@@ -61,13 +61,15 @@ function escapeHtml(text) {
 }
 
 function updateCounts() {
-  document.getElementById('findings-count').textContent = allFindings.length;
+  document.getElementById('findings-count').textContent = allFindingsFlat.length;
   document.getElementById('selected-count').textContent = selectedFindingIds.size;
 
-  // Enable insert button only if there are selected findings and no PDFs
+  // Enable insert button only if there are selected findings
   const insertButton = document.getElementById('insert-button');
-  if (allFindings.length > 0 && selectedFindingIds.size > 0) {
+  if (selectedFindingIds.size > 0) {
     insertButton.disabled = false;
+  } else {
+    insertButton.disabled = true;
   }
 }
 
@@ -110,57 +112,95 @@ function createFindingElement(finding) {
   return div;
 }
 
-function clearContainer(containerId) {
-  const container = document.getElementById(containerId);
-  container.innerHTML = '';
+function createPageCard(page, totalPages) {
+  const card = document.createElement('div');
+  card.id = `page-card-${page}`;
+  card.className = 'border border-gray-200 rounded-lg bg-white shadow-sm overflow-hidden';
+  card.innerHTML = `
+    <div class="flex h-full">
+      <!-- Image column (50%) -->
+      <div class="w-1/2 bg-gray-100 p-4 overflow-auto max-h-96">
+        <div class="relative">
+          <img
+            src="/job/${jobId}/page/${String(page).padStart(3, '0')}"
+            alt="Page ${page}"
+            class="w-full h-auto"
+          />
+          <div class="absolute top-2 right-2 bg-black bg-opacity-50 text-white px-2 py-1 rounded text-xs">
+            ${page} / ${totalPages}
+          </div>
+        </div>
+      </div>
+      <!-- Findings column (50%) -->
+      <div class="w-1/2 p-4 overflow-auto max-h-96">
+        <div id="findings-${page}" class="space-y-3">
+          <div class="text-center text-gray-500 py-4">
+            <p class="text-sm">Processing page...</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  return card;
 }
 
 // Open EventSource to stream processing
-const eventSource = new EventSource(`/stream/${jobId}`);
+const retryFrom = {{ retry_from|tojson }};
+const streamUrl = retryFrom ? `/stream/${jobId}?retry_from=${retryFrom}` : `/stream/${jobId}`;
+const eventSource = new EventSource(streamUrl);
 
 eventSource.addEventListener('start', (event) => {
   const data = JSON.parse(event.data);
   console.log(`Processing ${data.total_pages} pages...`);
-  clearContainer('pages-container');
-  clearContainer('findings-container');
+  totalPages = data.total_pages;
+  pageFindings = {};
+  allFindingsFlat = [];
+  selectedFindingIds = new Set();
+  isPartialMode = false;
+
+  const container = document.getElementById('pages-container');
+  container.innerHTML = '';
+  document.getElementById('error-message').classList.add('hidden');
+  document.getElementById('retry-button').classList.add('hidden');
 });
 
 eventSource.addEventListener('page_ready', (event) => {
   const data = JSON.parse(event.data);
   const { page, total_pages } = data;
 
-  // Add page image container
-  const pageDiv = document.createElement('div');
-  pageDiv.className = 'border border-gray-300 rounded overflow-hidden bg-gray-100';
-  pageDiv.innerHTML = `
-    <div class="relative">
-      <img
-        src="/job/${jobId}/page/${String(page).padStart(3, '0')}"
-        alt="Page ${page}"
-        class="w-full h-auto"
-      />
-      <div class="absolute top-2 right-2 bg-black bg-opacity-50 text-white px-2 py-1 rounded text-xs">
-        ${page} / ${total_pages}
-      </div>
-    </div>
-  `;
-
-  document.getElementById('pages-container').appendChild(pageDiv);
+  // Create page card with image + empty findings
+  const card = createPageCard(page, total_pages);
+  document.getElementById('pages-container').appendChild(card);
 });
 
 eventSource.addEventListener('page_findings', (event) => {
   const data = JSON.parse(event.data);
   const { page, findings } = data;
 
-  if (findings.length === 0) {
-    return;
+  // Show footer on first findings
+  document.getElementById('footer').classList.remove('hidden');
+
+  // Group findings by page
+  pageFindings[page] = findings;
+
+  // Add to flat list for counting
+  for (const finding of findings) {
+    allFindingsFlat.push(finding);
+    selectedFindingIds.add(finding.id);
   }
 
-  // Add findings to the list
-  for (const finding of findings) {
-    allFindings.push(finding);
-    const findingElement = createFindingElement(finding);
-    document.getElementById('findings-container').appendChild(findingElement);
+  // Populate findings in the page card
+  const findingsDiv = document.getElementById(`findings-${page}`);
+
+  if (findings.length === 0) {
+    findingsDiv.innerHTML = '<div class="text-center text-green-600 py-4"><p class="text-sm">✓ No errors found</p></div>';
+  } else {
+    findingsDiv.innerHTML = '';
+    for (const finding of findings) {
+      const findingElement = createFindingElement(finding);
+      findingsDiv.appendChild(findingElement);
+    }
   }
 
   updateCounts();
@@ -169,30 +209,80 @@ eventSource.addEventListener('page_findings', (event) => {
 eventSource.addEventListener('done', (event) => {
   const data = JSON.parse(event.data);
   console.log(`Processing complete. ${data.total_findings} total findings.`);
-
-  // Show footer with action button
-  document.getElementById('footer').classList.remove('hidden');
-
-  // If no findings, show message
-  if (allFindings.length === 0) {
-    document.getElementById('findings-container').innerHTML = '<div class="text-center text-gray-500 py-8">No issues found!</div>';
-  }
-
   eventSource.close();
 });
 
-eventSource.addEventListener('error', (event) => {
+eventSource.addEventListener('partial_complete', (event) => {
   const data = JSON.parse(event.data);
-  console.error('Processing error:', data.message);
+  console.error('Processing failed:', data.error_message);
 
-  const container = document.getElementById('findings-container');
-  container.innerHTML = `
-    <div class="border border-red-200 bg-red-50 rounded p-4 text-red-800">
-      <strong>Error:</strong> ${escapeHtml(data.message)}
-    </div>
+  isPartialMode = true;
+
+  // Show error message
+  const errorDiv = document.getElementById('error-message');
+  errorDiv.innerHTML = `
+    <strong>Error at page ${data.last_successful_page + 1}:</strong> ${escapeHtml(data.error_message)}<br/>
+    <span class="text-sm">Findings from pages 1–${data.last_successful_page} are ready to insert.</span>
   `;
+  errorDiv.classList.remove('hidden');
 
-  eventSource.close();
+  // Show retry button
+  const retryButton = document.getElementById('retry-button');
+  const retryPageSpan = document.getElementById('retry-page-num');
+  retryPageSpan.textContent = data.last_successful_page + 1;
+  retryButton.classList.remove('hidden');
+
+  // Enable insert button if there are findings
+  updateCounts();
+});
+
+eventSource.addEventListener('retry_start', (event) => {
+  const data = JSON.parse(event.data);
+  console.log(`Resuming from page ${data.starting_page}...`);
+  // Don't clear pageFindings or UI — just continue appending
+  document.getElementById('error-message').classList.add('hidden');
+  document.getElementById('retry-button').classList.add('hidden');
+});
+
+eventSource.addEventListener('error', (event) => {
+  try {
+    const data = JSON.parse(event.data);
+    console.error('Stream error:', data.message);
+
+    const errorDiv = document.getElementById('error-message');
+    errorDiv.innerHTML = `
+      <strong>Error:</strong> ${escapeHtml(data.message)}
+    `;
+    errorDiv.classList.remove('hidden');
+  } catch (e) {
+    console.error('EventSource error');
+  }
+});
+
+// Retry button handler
+document.getElementById('retry-button').addEventListener('click', async () => {
+  const retryButton = document.getElementById('retry-button');
+  retryButton.disabled = true;
+  retryButton.textContent = 'Retrying...';
+
+  try {
+    const response = await fetch(`/retry-check/${jobId}`, {
+      method: 'POST',
+    });
+
+    if (!response.ok) {
+      alert('Retry failed');
+      retryButton.disabled = false;
+      retryButton.textContent = 'Retry from page';
+      return;
+    }
+
+    // Redirect will happen automatically via 303
+  } catch (error) {
+    alert(`Error retrying: ${error.message}`);
+    retryButton.disabled = false;
+    retryButton.textContent = 'Retry from page';
+  }
 });
 
 // Insert button handler

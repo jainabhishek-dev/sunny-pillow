@@ -7,7 +7,7 @@ provider: gemini
 
 # Gemini vision models: gemini-2.0-flash | gemini-2.5-flash (must support vision)
 # Anthropic vision models: claude-sonnet-4-6 | claude-opus-4-7 (must support vision)
-model: gemini-3-flash-preview
+model: gemini-2.5-flash
 
 # Name of the environment variable that holds the API key for the chosen provider.
 api_key_env: GEMINI_API_KEY
