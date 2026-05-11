@@ -1,4 +1,4 @@
-# AI provider configuration for Sunny Pillow.
+# AI provider configuration for CheckPoint.
 # Change provider + model + api_key_env to switch AI backends with no code changes.
 # NOTE: Both providers must support vision (image input) for the current architecture.
 

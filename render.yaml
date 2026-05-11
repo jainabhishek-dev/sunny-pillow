@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: sunny-pillow
+    name: checkpoint
     env: python
     region: oregon
     plan: free

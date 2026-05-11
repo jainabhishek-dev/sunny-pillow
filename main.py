@@ -22,12 +22,12 @@ from reader import get_file_as_pdf, get_pdf_bytes_by_id
 
 load_dotenv()
 
-app = FastAPI(title="Sunny Pillow")
+app = FastAPI(title="CheckPoint")
 
 app.add_middleware(
     SessionMiddleware,
     secret_key=os.getenv("SECRET_KEY", ""),
-    session_cookie="sunny_pillow_session",
+    session_cookie="checkpoint_session",
     max_age=3600,
     # True in production (Render always serves over HTTPS); False for local HTTP dev.
     https_only=os.getenv("ENV") == "production",
@@ -37,7 +37,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
 # Job storage directory
-_JOBS_DIR = Path(tempfile.gettempdir()) / "sunny_pillow_jobs"
+_JOBS_DIR = Path(tempfile.gettempdir()) / "checkpoint_jobs"
 _JOBS_DIR.mkdir(exist_ok=True)
 
 

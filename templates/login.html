@@ -1,13 +1,22 @@
 {% extends "base.html" %}
-{% block title %}Sign In — Sunny Pillow{% endblock %}
+{% block title %}Sign In — CheckPoint{% endblock %}
 
 {% block content %}
 <div class="min-h-[70vh] flex items-center justify-center">
   <div class="bg-white rounded-2xl shadow-md border border-gray-100 p-10 w-full max-w-md text-center">
 
-    <div class="text-5xl mb-4">☀️</div>
-    <h1 class="text-2xl font-bold text-indigo-700 mb-1">Sunny Pillow</h1>
-    <p class="text-gray-500 text-sm mb-8">House Style Checker for LEAD editors</p>
+    <div class="w-16 h-16 mx-auto mb-4">
+      <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="100" cy="100" r="95" fill="none" stroke="#F97316" stroke-width="8"/>
+        <circle cx="100" cy="100" r="65" fill="none" stroke="#F97316" stroke-width="8"/>
+        <circle cx="100" cy="100" r="35" fill="none" stroke="#F97316" stroke-width="8"/>
+        <g transform="translate(100, 100)">
+          <path d="M -15 0 L -5 10 L 15 -10" fill="none" stroke="#10B981" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+        </g>
+      </svg>
+    </div>
+    <h1 class="text-2xl font-bold text-orange-600 mb-1">CheckPoint</h1>
+    <p class="text-gray-500 text-sm mb-8">CheckPoint for LEAD</p>
 
     <a href="/login/google"
        class="inline-flex items-center justify-center gap-3 w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 px-6 rounded-xl transition">

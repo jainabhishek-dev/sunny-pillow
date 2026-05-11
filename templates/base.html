@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>{% block title %}Sunny Pillow{% endblock %}</title>
+  <title>{% block title %}CheckPoint{% endblock %}</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="/static/style.css" />
 </head>
@@ -13,9 +13,18 @@
 
   <!-- Navigation -->
   <nav class="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between shadow-sm">
-    <div class="flex items-center gap-2">
-      <span class="text-xl font-bold text-indigo-700">☀️ Sunny Pillow</span>
-      <span class="text-xs text-gray-400 ml-2">House Style Checker</span>
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8">
+        <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="100" cy="100" r="95" fill="none" stroke="#F97316" stroke-width="8"/>
+          <circle cx="100" cy="100" r="65" fill="none" stroke="#F97316" stroke-width="8"/>
+          <circle cx="100" cy="100" r="35" fill="none" stroke="#F97316" stroke-width="8"/>
+          <g transform="translate(100, 100)">
+            <path d="M -15 0 L -5 10 L 15 -10" fill="none" stroke="#10B981" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+          </g>
+        </svg>
+      </div>
+      <span class="text-xl font-bold text-orange-600">CheckPoint</span>
     </div>
     {% if user %}
     <div class="flex items-center gap-4">
