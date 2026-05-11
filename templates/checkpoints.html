@@ -1,0 +1,210 @@
+{% extends "base.html" %}
+{% block title %}Manage Checkpoints — CheckPoint{% endblock %}
+
+{% block content %}
+
+<div class="flex items-center justify-between mb-8">
+  <div>
+    <h2 class="text-2xl font-bold text-gray-800">Manage Checkpoints</h2>
+    <p class="text-gray-500 text-sm mt-1">Add, edit, or delete checkpoints across all workflows.</p>
+  </div>
+  <button
+    onclick="document.getElementById('add-form').classList.toggle('hidden')"
+    class="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-5 py-2.5 rounded-xl transition text-sm shadow-sm">
+    + Add Checkpoint
+  </button>
+</div>
+
+<!-- Success / error banner -->
+{% if success %}
+<div class="mb-6 bg-green-50 border border-green-200 text-green-700 rounded-xl px-5 py-3 text-sm">
+  {{ success }}
+</div>
+{% endif %}
+{% if error %}
+<div class="mb-6 bg-red-50 border border-red-200 text-red-700 rounded-xl px-5 py-3 text-sm">
+  {{ error }}
+</div>
+{% endif %}
+
+<!-- Add Checkpoint form (hidden by default) -->
+<div id="add-form" class="hidden mb-8 bg-white rounded-2xl border border-indigo-200 shadow-sm p-6">
+  <h3 class="text-sm font-semibold text-gray-700 mb-4">New Checkpoint</h3>
+  <form method="POST" action="/checkpoints/add" class="space-y-4">
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div>
+        <label class="block text-xs font-semibold text-gray-600 mb-1">Name</label>
+        <input type="text" name="name" required
+          class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-gray-600 mb-1">Category</label>
+        <input type="text" name="category" required
+          class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+      </div>
+    </div>
+
+    <div>
+      <label class="block text-xs font-semibold text-gray-600 mb-1">Description</label>
+      <textarea name="description" rows="3" required
+        class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"></textarea>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div>
+        <label class="block text-xs font-semibold text-gray-600 mb-1">Type</label>
+        <select name="type" required
+          class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400">
+          <option value="rule">rule</option>
+          <option value="judgment">judgment</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-gray-600 mb-1">Workflows</label>
+        <div class="flex gap-4 mt-1">
+          {% for workflow in workflows %}
+          <label class="flex items-center gap-1.5 text-sm text-gray-700 cursor-pointer">
+            <input type="checkbox" name="workflows" value="{{ workflow.id }}" class="rounded" />
+            {{ workflow.name }}
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <div class="flex justify-end gap-3 pt-2">
+      <button type="button" onclick="document.getElementById('add-form').classList.add('hidden')"
+        class="text-sm text-gray-500 hover:text-gray-700 font-medium transition">
+        Cancel
+      </button>
+      <button type="submit"
+        class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold px-5 py-2 rounded-lg transition">
+        Save
+      </button>
+    </div>
+
+  </form>
+</div>
+
+<!-- Checkpoints grouped by workflow then category -->
+{% for wid, wdata in by_workflow.items() %}
+<div class="mb-10">
+  <h3 class="text-lg font-bold text-gray-800 mb-4 pb-2 border-b border-gray-200">
+    {{ wdata.workflow.name }}
+    <span class="text-xs font-normal text-gray-400 ml-2">{{ wdata.workflow.description }}</span>
+  </h3>
+
+  {% for category, checkpoints in wdata.categories.items() %}
+  <div class="mb-6">
+    <p class="text-xs font-bold uppercase tracking-wider text-indigo-500 mb-2">{{ category }}</p>
+
+    <div class="space-y-2">
+      {% for cp in checkpoints %}
+      <div class="bg-white rounded-xl border border-gray-100 shadow-sm" id="cp-row-{{ cp.id }}">
+
+        <!-- Collapsed row -->
+        <div class="flex items-start justify-between px-4 py-3 gap-4">
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-sm font-semibold text-gray-800">{{ cp.name }}</span>
+              <span class="text-xs px-1.5 py-0.5 rounded-full
+                {% if cp.type == 'rule' %}bg-blue-50 text-blue-600{% else %}bg-amber-50 text-amber-600{% endif %}">
+                {{ cp.type }}
+              </span>
+              <span class="text-xs text-gray-400">{{ cp.id }}</span>
+            </div>
+            <p class="text-xs text-gray-500 mt-0.5 leading-relaxed">{{ cp.description | truncate(140) }}</p>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <button
+              onclick="toggleEdit('{{ cp.id }}')"
+              class="text-xs text-indigo-600 hover:text-indigo-800 font-medium transition px-2 py-1 rounded hover:bg-indigo-50">
+              Edit
+            </button>
+            <form method="POST" action="/checkpoints/{{ cp.id }}/delete"
+              onsubmit="return confirm('Delete {{ cp.name }}? This cannot be undone.')">
+              <button type="submit"
+                class="text-xs text-red-500 hover:text-red-700 font-medium transition px-2 py-1 rounded hover:bg-red-50">
+                Delete
+              </button>
+            </form>
+          </div>
+        </div>
+
+        <!-- Inline edit form (hidden by default) -->
+        <div id="edit-{{ cp.id }}" class="hidden border-t border-gray-100 px-4 py-4 bg-gray-50 rounded-b-xl">
+          <form method="POST" action="/checkpoints/{{ cp.id }}/edit" class="space-y-3">
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs font-semibold text-gray-600 mb-1">Name</label>
+                <input type="text" name="name" value="{{ cp.name }}" required
+                  class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-gray-600 mb-1">Category</label>
+                <input type="text" name="category" value="{{ cp.category }}" required
+                  class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+              </div>
+            </div>
+
+            <div>
+              <label class="block text-xs font-semibold text-gray-600 mb-1">Description</label>
+              <textarea name="description" rows="3" required
+                class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400">{{ cp.description }}</textarea>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs font-semibold text-gray-600 mb-1">Type</label>
+                <select name="type"
+                  class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400">
+                  <option value="rule" {% if cp.type == 'rule' %}selected{% endif %}>rule</option>
+                  <option value="judgment" {% if cp.type == 'judgment' %}selected{% endif %}>judgment</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-gray-600 mb-1">Workflows</label>
+                <div class="flex gap-4 mt-1">
+                  {% for workflow in workflows %}
+                  <label class="flex items-center gap-1.5 text-sm text-gray-700 cursor-pointer">
+                    <input type="checkbox" name="workflows" value="{{ workflow.id }}"
+                      {% if workflow.id in cp.workflows %}checked{% endif %} class="rounded" />
+                    {{ workflow.name }}
+                  </label>
+                  {% endfor %}
+                </div>
+              </div>
+            </div>
+
+            <div class="flex justify-end gap-3 pt-1">
+              <button type="button" onclick="toggleEdit('{{ cp.id }}')"
+                class="text-sm text-gray-500 hover:text-gray-700 font-medium transition">
+                Cancel
+              </button>
+              <button type="submit"
+                class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold px-4 py-1.5 rounded-lg transition">
+                Save
+              </button>
+            </div>
+
+          </form>
+        </div>
+
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endfor %}
+
+<script>
+  function toggleEdit(id) {
+    const el = document.getElementById('edit-' + id);
+    el.classList.toggle('hidden');
+  }
+</script>
+
+{% endblock %}

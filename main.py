@@ -16,6 +16,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 import auth
+import db
 from checker import run_vision_check
 from commenter import post_selected_comments
 from reader import get_file_as_pdf, get_pdf_bytes_by_id
@@ -63,13 +64,13 @@ def _load_job(job_id: str) -> dict | None:
     return None
 
 
-# ── Startup: load checkpoints once ───────────────────────────────────────────
+# ── Startup: load checkpoints and workflows ───────────────────────────────────
 
-def _load_checkpoints_and_workflows() -> tuple[list[dict], list[dict]]:
+def _load_workflows() -> list[dict]:
     path = Path(__file__).parent / "checkpoints.yaml"
     with open(path, encoding="utf-8") as f:
         data = yaml.safe_load(f)
-    return data["checkpoints"], data.get("workflows", [])
+    return data.get("workflows", [])
 
 
 def _group_by_category(checkpoints: list[dict]) -> dict[str, list[dict]]:
@@ -81,15 +82,23 @@ def _group_by_category(checkpoints: list[dict]) -> dict[str, list[dict]]:
 
 
 def _filter_checkpoints_by_workflow(checkpoints: list[dict], workflow_id: str) -> list[dict]:
-    """Filter checkpoints that include the given workflow."""
     return [cp for cp in checkpoints if workflow_id in cp.get("workflows", [])]
 
 
-CHECKPOINTS: list[dict]
-WORKFLOWS: list[dict]
-CHECKPOINTS, WORKFLOWS = _load_checkpoints_and_workflows()
-CHECKPOINT_MAP: dict[str, dict] = {cp["id"]: cp for cp in CHECKPOINTS}
-CATEGORIES: dict[str, list[dict]] = _group_by_category(CHECKPOINTS)
+def _reload_checkpoints() -> None:
+    """Reload checkpoints from Supabase into global state."""
+    global CHECKPOINTS, CHECKPOINT_MAP, CATEGORIES
+    CHECKPOINTS = db.fetch_all_checkpoints()
+    CHECKPOINT_MAP = {cp["id"]: cp for cp in CHECKPOINTS}
+    CATEGORIES = _group_by_category(CHECKPOINTS)
+
+
+# Workflows stay in YAML (static config); checkpoints come from Supabase
+WORKFLOWS: list[dict] = _load_workflows()
+CHECKPOINTS: list[dict] = []
+CHECKPOINT_MAP: dict[str, dict] = {}
+CATEGORIES: dict[str, list[dict]] = {}
+_reload_checkpoints()
 
 
 # ── Auth routes ───────────────────────────────────────────────────────────────
@@ -534,3 +543,117 @@ async def insert_comments(
         return {"posted": posted, "total_selected": len(selected_findings)}
     except Exception as exc:
         return {"error": f"Could not post comments: {str(exc)}"}
+
+
+# ── Checkpoint management routes ──────────────────────────────────────────────
+
+def _next_checkpoint_id() -> str:
+    """Generate the next sequential checkpoint ID (e.g. cp_042)."""
+    existing = [cp["id"] for cp in CHECKPOINTS if cp["id"].startswith("cp_")]
+    nums = []
+    for cid in existing:
+        try:
+            nums.append(int(cid.split("_")[1]))
+        except (IndexError, ValueError):
+            pass
+    next_num = max(nums, default=0) + 1
+    return f"cp_{next_num:03d}"
+
+
+@app.get("/checkpoints", response_class=HTMLResponse)
+async def manage_checkpoints(request: Request):
+    user = auth.get_current_user(request)
+    if not user:
+        return RedirectResponse(url="/login")
+
+    by_workflow = {}
+    for workflow in WORKFLOWS:
+        wid = workflow["id"]
+        wcp = _filter_checkpoints_by_workflow(CHECKPOINTS, wid)
+        by_workflow[wid] = {
+            "workflow": workflow,
+            "categories": _group_by_category(wcp),
+        }
+
+    return templates.TemplateResponse("checkpoints.html", {
+        "request": request,
+        "user": user,
+        "workflows": WORKFLOWS,
+        "by_workflow": by_workflow,
+        "success": request.query_params.get("success"),
+        "error": request.query_params.get("error"),
+    })
+
+
+@app.post("/checkpoints/add", response_class=HTMLResponse)
+async def add_checkpoint(
+    request: Request,
+    name: Annotated[str, Form()],
+    category: Annotated[str, Form()],
+    description: Annotated[str, Form()],
+    type: Annotated[str, Form()],
+    workflows: Annotated[list[str], Form()],
+):
+    user = auth.get_current_user(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+
+    new_id = _next_checkpoint_id()
+    sort_order = max((cp["sort_order"] for cp in CHECKPOINTS), default=0) + 1
+
+    try:
+        db.insert_checkpoint({
+            "id": new_id,
+            "category": category.strip(),
+            "name": name.strip(),
+            "description": description.strip(),
+            "type": type,
+            "workflows": workflows,
+            "sort_order": sort_order,
+        })
+        _reload_checkpoints()
+        return RedirectResponse(url="/checkpoints?success=Checkpoint+added.", status_code=303)
+    except Exception as exc:
+        return RedirectResponse(url=f"/checkpoints?error={exc}", status_code=303)
+
+
+@app.post("/checkpoints/{cp_id}/edit", response_class=HTMLResponse)
+async def edit_checkpoint(
+    request: Request,
+    cp_id: str,
+    name: Annotated[str, Form()],
+    category: Annotated[str, Form()],
+    description: Annotated[str, Form()],
+    type: Annotated[str, Form()],
+    workflows: Annotated[list[str], Form()],
+):
+    user = auth.get_current_user(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+
+    try:
+        db.update_checkpoint(cp_id, {
+            "category": category.strip(),
+            "name": name.strip(),
+            "description": description.strip(),
+            "type": type,
+            "workflows": workflows,
+        })
+        _reload_checkpoints()
+        return RedirectResponse(url="/checkpoints?success=Checkpoint+updated.", status_code=303)
+    except Exception as exc:
+        return RedirectResponse(url=f"/checkpoints?error={exc}", status_code=303)
+
+
+@app.post("/checkpoints/{cp_id}/delete", response_class=HTMLResponse)
+async def delete_checkpoint(request: Request, cp_id: str):
+    user = auth.get_current_user(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+
+    try:
+        db.delete_checkpoint(cp_id)
+        _reload_checkpoints()
+        return RedirectResponse(url="/checkpoints?success=Checkpoint+deleted.", status_code=303)
+    except Exception as exc:
+        return RedirectResponse(url=f"/checkpoints?error={exc}", status_code=303)
