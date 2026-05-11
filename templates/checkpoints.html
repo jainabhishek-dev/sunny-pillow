@@ -32,22 +32,15 @@
   <h3 class="text-sm font-semibold text-gray-700 mb-4">New Checkpoint</h3>
   <form method="POST" action="/checkpoints/add" class="space-y-4">
 
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <div>
-        <label class="block text-xs font-semibold text-gray-600 mb-1">Name</label>
-        <input type="text" name="name" required
-          class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
-      </div>
-      <div>
-        <label class="block text-xs font-semibold text-gray-600 mb-1">Category</label>
-        <input type="text" name="category" required
-          class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
-      </div>
+    <div>
+      <label class="block text-xs font-semibold text-gray-600 mb-1">Category</label>
+      <input type="text" name="category" required
+        class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
     </div>
 
     <div>
-      <label class="block text-xs font-semibold text-gray-600 mb-1">Description</label>
-      <textarea name="description" rows="3" required
+      <label class="block text-xs font-semibold text-gray-600 mb-1">Instructions</label>
+      <textarea name="instructions" rows="3" required
         class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"></textarea>
     </div>
 
@@ -114,7 +107,7 @@
               </span>
               <span class="text-xs text-gray-400">{{ cp.id }}</span>
             </div>
-            <p class="text-xs text-gray-500 mt-0.5 leading-relaxed">{{ cp.description | truncate(140) }}</p>
+            <p class="text-xs text-gray-500 mt-0.5 leading-relaxed">{{ cp.instructions | truncate(140) }}</p>
           </div>
           <div class="flex items-center gap-2 shrink-0">
             <button
@@ -136,23 +129,16 @@
         <div id="edit-{{ cp.id }}" class="hidden border-t border-gray-100 px-4 py-4 bg-gray-50 rounded-b-xl">
           <form method="POST" action="/checkpoints/{{ cp.id }}/edit" class="space-y-3">
 
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <label class="block text-xs font-semibold text-gray-600 mb-1">Name</label>
-                <input type="text" name="name" value="{{ cp.name }}" required
-                  class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
-              </div>
-              <div>
-                <label class="block text-xs font-semibold text-gray-600 mb-1">Category</label>
-                <input type="text" name="category" value="{{ cp.category }}" required
-                  class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
-              </div>
+            <div>
+              <label class="block text-xs font-semibold text-gray-600 mb-1">Category</label>
+              <input type="text" name="category" value="{{ cp.category }}" required
+                class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
             </div>
 
             <div>
-              <label class="block text-xs font-semibold text-gray-600 mb-1">Description</label>
-              <textarea name="description" rows="3" required
-                class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400">{{ cp.description }}</textarea>
+              <label class="block text-xs font-semibold text-gray-600 mb-1">Instructions</label>
+              <textarea name="instructions" rows="3" required
+                class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400">{{ cp.instructions }}</textarea>
             </div>
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3">

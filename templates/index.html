@@ -115,16 +115,13 @@
             />
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2">
-                <span class="text-sm font-medium text-gray-700 group-hover:text-indigo-700 transition">
-                  {{ cp.name }}
-                </span>
                 <span class="text-xs px-1.5 py-0.5 rounded-full
                   {% if cp.type == 'rule' %}bg-blue-50 text-blue-600{% else %}bg-amber-50 text-amber-600{% endif %}">
                   {{ cp.type }}
                 </span>
               </div>
-              <p class="text-xs text-gray-400 mt-0.5 leading-relaxed">
-                {{ cp.description | truncate(120) }}
+              <p class="text-xs text-gray-500 mt-0.5 leading-relaxed">
+                {{ cp.instructions | truncate(120) }}
               </p>
             </div>
           </label>

@@ -57,7 +57,7 @@ Return [] if no violations found on this page."""
 def _build_vision_prompt(checkpoints: list[dict], page_num: int, workflow_id: str = "edit") -> str:
     """Build the vision AI prompt for checking a single page image."""
     rules = "\n".join(
-        f"{i + 1}. [{cp['id']}] {cp['name']}: {cp['description'].strip()}"
+        f"{i + 1}. [{cp['id']}] {cp['instructions'].strip()}"
         for i, cp in enumerate(checkpoints)
     )
     if workflow_id == "math":

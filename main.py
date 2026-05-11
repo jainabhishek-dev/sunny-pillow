@@ -274,7 +274,7 @@ async def show_process(request: Request, job_id: str, retry_from: int = None):
     if not job:
         return RedirectResponse(url="/?error=Job+not+found.+Please+run+a+new+check.")
 
-    checkpoint_names = {cp["id"]: cp["name"] for cp in CHECKPOINTS}
+    checkpoint_names = {cp["id"]: cp["category"] for cp in CHECKPOINTS}
 
     return templates.TemplateResponse("process.html", {
         "request": request,
@@ -586,9 +586,8 @@ async def manage_checkpoints(request: Request):
 @app.post("/checkpoints/add", response_class=HTMLResponse)
 async def add_checkpoint(
     request: Request,
-    name: Annotated[str, Form()],
     category: Annotated[str, Form()],
-    description: Annotated[str, Form()],
+    instructions: Annotated[str, Form()],
     type: Annotated[str, Form()],
     workflows: Annotated[list[str], Form()],
 ):
@@ -603,8 +602,7 @@ async def add_checkpoint(
         db.insert_checkpoint({
             "id": new_id,
             "category": category.strip(),
-            "name": name.strip(),
-            "description": description.strip(),
+            "instructions": instructions.strip(),
             "type": type,
             "workflows": workflows,
             "sort_order": sort_order,
@@ -619,9 +617,8 @@ async def add_checkpoint(
 async def edit_checkpoint(
     request: Request,
     cp_id: str,
-    name: Annotated[str, Form()],
     category: Annotated[str, Form()],
-    description: Annotated[str, Form()],
+    instructions: Annotated[str, Form()],
     type: Annotated[str, Form()],
     workflows: Annotated[list[str], Form()],
 ):
@@ -632,8 +629,7 @@ async def edit_checkpoint(
     try:
         db.update_checkpoint(cp_id, {
             "category": category.strip(),
-            "name": name.strip(),
-            "description": description.strip(),
+            "instructions": instructions.strip(),
             "type": type,
             "workflows": workflows,
         })
