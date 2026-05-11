@@ -617,7 +617,6 @@ async def add_checkpoint(
 async def edit_checkpoint(
     request: Request,
     cp_id: str,
-    category: Annotated[str, Form()],
     instructions: Annotated[str, Form()],
     type: Annotated[str, Form()],
     workflows: Annotated[list[str], Form()],
@@ -628,7 +627,6 @@ async def edit_checkpoint(
 
     try:
         db.update_checkpoint(cp_id, {
-            "category": category.strip(),
             "instructions": instructions.strip(),
             "type": type,
             "workflows": workflows,
