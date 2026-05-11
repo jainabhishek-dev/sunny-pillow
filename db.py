@@ -1,37 +1,73 @@
-"""Supabase client and checkpoint data-access helpers."""
+"""Supabase data-access helpers using httpx REST API directly."""
 
 import os
-from supabase import create_client, Client
+import httpx
 
-_client: Client | None = None
+_HEADERS_CACHE: dict | None = None
 
 
-def get_client() -> Client:
-    global _client
-    if _client is None:
+def _headers() -> dict:
+    global _HEADERS_CACHE
+    if _HEADERS_CACHE is None:
         url = os.getenv("SUPABASE_URL")
         key = os.getenv("SUPABASE_KEY")
         if not url or not key:
             raise RuntimeError("SUPABASE_URL and SUPABASE_KEY must be set")
-        _client = create_client(url, key)
-    return _client
+        _HEADERS_CACHE = {
+            "apikey": key,
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+            "Prefer": "return=representation",
+        }
+    return _HEADERS_CACHE
+
+
+def _base_url() -> str:
+    url = os.getenv("SUPABASE_URL", "").rstrip("/")
+    return f"{url}/rest/v1"
 
 
 def fetch_all_checkpoints() -> list[dict]:
-    """Return all checkpoints ordered by sort_order."""
-    result = get_client().table("checkpoints").select("*").order("sort_order").execute()
-    return result.data
+    resp = httpx.get(
+        f"{_base_url()}/checkpoints",
+        headers=_headers(),
+        params={"order": "sort_order"},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    return resp.json()
 
 
 def insert_checkpoint(row: dict) -> dict:
-    result = get_client().table("checkpoints").insert(row).execute()
-    return result.data[0]
+    resp = httpx.post(
+        f"{_base_url()}/checkpoints",
+        headers=_headers(),
+        json=row,
+        timeout=10,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    return data[0] if isinstance(data, list) else data
 
 
 def update_checkpoint(cp_id: str, fields: dict) -> dict:
-    result = get_client().table("checkpoints").update(fields).eq("id", cp_id).execute()
-    return result.data[0]
+    resp = httpx.patch(
+        f"{_base_url()}/checkpoints",
+        headers=_headers(),
+        params={"id": f"eq.{cp_id}"},
+        json=fields,
+        timeout=10,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    return data[0] if isinstance(data, list) else data
 
 
 def delete_checkpoint(cp_id: str) -> None:
-    get_client().table("checkpoints").delete().eq("id", cp_id).execute()
+    resp = httpx.delete(
+        f"{_base_url()}/checkpoints",
+        headers=_headers(),
+        params={"id": f"eq.{cp_id}"},
+        timeout=10,
+    )
+    resp.raise_for_status()

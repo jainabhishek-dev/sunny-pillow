@@ -93,12 +93,27 @@ def _reload_checkpoints() -> None:
     CATEGORIES = _group_by_category(CHECKPOINTS)
 
 
+def _load_checkpoints_from_yaml() -> list[dict]:
+    path = Path(__file__).parent / "checkpoints.yaml"
+    with open(path, encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    return data["checkpoints"]
+
+
 # Workflows stay in YAML (static config); checkpoints come from Supabase
 WORKFLOWS: list[dict] = _load_workflows()
 CHECKPOINTS: list[dict] = []
 CHECKPOINT_MAP: dict[str, dict] = {}
 CATEGORIES: dict[str, list[dict]] = {}
-_reload_checkpoints()
+
+try:
+    _reload_checkpoints()
+except Exception as _e:
+    import logging
+    logging.warning(f"Could not load checkpoints from Supabase ({_e}); falling back to YAML.")
+    CHECKPOINTS = _load_checkpoints_from_yaml()
+    CHECKPOINT_MAP = {cp["id"]: cp for cp in CHECKPOINTS}
+    CATEGORIES = _group_by_category(CHECKPOINTS)
 
 
 # ── Auth routes ───────────────────────────────────────────────────────────────
