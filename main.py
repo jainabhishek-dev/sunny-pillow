@@ -267,12 +267,15 @@ async def show_process(request: Request, job_id: str, retry_from: int = None):
     if not job:
         return RedirectResponse(url="/?error=Job+not+found.+Please+run+a+new+check.")
 
+    checkpoint_names = {cp["id"]: cp["name"] for cp in CHECKPOINTS}
+
     return templates.TemplateResponse("process.html", {
         "request": request,
         "user": user,
         "job_id": job_id,
         "title": job["title"],
         "retry_from": retry_from,
+        "checkpoint_names": checkpoint_names,
     })
 
 
