@@ -65,11 +65,11 @@ def _load_job(job_id: str) -> dict | None:
 
 # ── Startup: load checkpoints once ───────────────────────────────────────────
 
-def _load_checkpoints() -> list[dict]:
+def _load_checkpoints_and_workflows() -> tuple[list[dict], list[dict]]:
     path = Path(__file__).parent / "checkpoints.yaml"
     with open(path, encoding="utf-8") as f:
         data = yaml.safe_load(f)
-    return data["checkpoints"]
+    return data["checkpoints"], data.get("workflows", [])
 
 
 def _group_by_category(checkpoints: list[dict]) -> dict[str, list[dict]]:
@@ -80,7 +80,14 @@ def _group_by_category(checkpoints: list[dict]) -> dict[str, list[dict]]:
     return categories
 
 
-CHECKPOINTS: list[dict] = _load_checkpoints()
+def _filter_checkpoints_by_workflow(checkpoints: list[dict], workflow_id: str) -> list[dict]:
+    """Filter checkpoints that include the given workflow."""
+    return [cp for cp in checkpoints if workflow_id in cp.get("workflows", [])]
+
+
+CHECKPOINTS: list[dict]
+WORKFLOWS: list[dict]
+CHECKPOINTS, WORKFLOWS = _load_checkpoints_and_workflows()
 CHECKPOINT_MAP: dict[str, dict] = {cp["id"]: cp for cp in CHECKPOINTS}
 CATEGORIES: dict[str, list[dict]] = _group_by_category(CHECKPOINTS)
 
@@ -119,10 +126,24 @@ async def index(request: Request):
         return RedirectResponse(url="/login")
 
     error = request.query_params.get("error")
+    workflow_id = request.query_params.get("workflow")
+
+    # Filter checkpoints based on selected workflow
+    if workflow_id:
+        filtered_checkpoints = _filter_checkpoints_by_workflow(CHECKPOINTS, workflow_id)
+        filtered_categories = _group_by_category(filtered_checkpoints)
+    else:
+        filtered_categories = {}
+
+    # Find the selected workflow object
+    selected_workflow = next((w for w in WORKFLOWS if w["id"] == workflow_id), None)
+
     return templates.TemplateResponse("index.html", {
         "request": request,
         "user": user,
-        "categories": CATEGORIES,
+        "workflows": WORKFLOWS,
+        "selected_workflow": selected_workflow,
+        "categories": filtered_categories,
         "error": error,
     })
 
@@ -131,6 +152,7 @@ async def index(request: Request):
 async def run_check(
     request: Request,
     drive_url: Annotated[str, Form()],
+    workflow_id: Annotated[str, Form()],
     checkpoint_ids: Annotated[list[str], Form()] = [],
 ):
     """Validate input and create a job, then redirect to the processing page."""
@@ -140,21 +162,43 @@ async def run_check(
     if not user or not token:
         return RedirectResponse(url="/login", status_code=303)
 
-    # Validate that at least one checkpoint was selected
-    if not checkpoint_ids:
+    # Validate that a workflow was selected
+    if not workflow_id or workflow_id not in [w["id"] for w in WORKFLOWS]:
+        filtered_categories = {}
         return templates.TemplateResponse("index.html", {
             "request": request,
             "user": user,
-            "categories": CATEGORIES,
+            "workflows": WORKFLOWS,
+            "selected_workflow": None,
+            "categories": filtered_categories,
+            "error": "Please select a workflow before running the check.",
+        })
+
+    # Validate that at least one checkpoint was selected
+    if not checkpoint_ids:
+        filtered_checkpoints = _filter_checkpoints_by_workflow(CHECKPOINTS, workflow_id)
+        filtered_categories = _group_by_category(filtered_checkpoints)
+        selected_workflow = next((w for w in WORKFLOWS if w["id"] == workflow_id), None)
+        return templates.TemplateResponse("index.html", {
+            "request": request,
+            "user": user,
+            "workflows": WORKFLOWS,
+            "selected_workflow": selected_workflow,
+            "categories": filtered_categories,
             "error": "Please select at least one checkpoint before running the check.",
         })
 
     # Validate that the URL field is not empty
     if not drive_url.strip():
+        filtered_checkpoints = _filter_checkpoints_by_workflow(CHECKPOINTS, workflow_id)
+        filtered_categories = _group_by_category(filtered_checkpoints)
+        selected_workflow = next((w for w in WORKFLOWS if w["id"] == workflow_id), None)
         return templates.TemplateResponse("index.html", {
             "request": request,
             "user": user,
-            "categories": CATEGORIES,
+            "workflows": WORKFLOWS,
+            "selected_workflow": selected_workflow,
+            "categories": filtered_categories,
             "error": "Please enter a Google Drive file URL.",
         })
 
@@ -169,10 +213,15 @@ async def run_check(
             None, partial(get_file_as_pdf, token, drive_url.strip())
         )
     except ValueError as exc:
+        filtered_checkpoints = _filter_checkpoints_by_workflow(CHECKPOINTS, workflow_id)
+        filtered_categories = _group_by_category(filtered_checkpoints)
+        selected_workflow = next((w for w in WORKFLOWS if w["id"] == workflow_id), None)
         return templates.TemplateResponse("index.html", {
             "request": request,
             "user": user,
-            "categories": CATEGORIES,
+            "workflows": WORKFLOWS,
+            "selected_workflow": selected_workflow,
+            "categories": filtered_categories,
             "error": str(exc),
         })
     except Exception as exc:
@@ -180,10 +229,15 @@ async def run_check(
         if "invalid_grant" in error_msg or "Token has been expired" in error_msg:
             request.session.clear()
             return RedirectResponse(url="/login", status_code=303)
+        filtered_checkpoints = _filter_checkpoints_by_workflow(CHECKPOINTS, workflow_id)
+        filtered_categories = _group_by_category(filtered_checkpoints)
+        selected_workflow = next((w for w in WORKFLOWS if w["id"] == workflow_id), None)
         return templates.TemplateResponse("index.html", {
             "request": request,
             "user": user,
-            "categories": CATEGORIES,
+            "workflows": WORKFLOWS,
+            "selected_workflow": selected_workflow,
+            "categories": filtered_categories,
             "error": f"Could not read the file: {error_msg}",
         })
 
@@ -193,6 +247,7 @@ async def run_check(
         "file_id": file_data["file_id"],
         "file_type": file_data["file_type"],
         "title": file_data["title"],
+        "workflow_id": workflow_id,
         "checkpoint_ids": [cp["id"] for cp in selected_checkpoints],
         "status": "processing",
     })
@@ -319,8 +374,9 @@ async def _stream_processing(job_id: str, token: dict, retry_from: int = None) -
             yield f"event: page_ready\ndata: {json.dumps({'page': page_num, 'total_pages': total_pages})}\n\n"
 
             # Call vision AI in executor (blocking operation)
+            workflow_id = job.get("workflow_id", "edit")
             findings = await loop.run_in_executor(
-                None, partial(run_vision_check, img_bytes, selected_checkpoints, page_num)
+                None, partial(run_vision_check, img_bytes, selected_checkpoints, page_num, workflow_id)
             )
 
             # Assign finding IDs and add page reference

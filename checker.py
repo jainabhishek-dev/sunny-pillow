@@ -14,13 +14,7 @@ def _load_model_config() -> dict:
         return yaml.safe_load(f)
 
 
-def _build_vision_prompt(checkpoints: list[dict], page_num: int) -> str:
-    """Build the vision AI prompt for checking a single page image."""
-    rules = "\n".join(
-        f"{i + 1}. [{cp['id']}] {cp['name']}: {cp['description'].strip()}"
-        for i, cp in enumerate(checkpoints)
-    )
-    return f"""You are a professional editorial checker for LEAD, an educational publishing house.
+EDIT_PROMPT = """You are a professional editorial checker for LEAD, an educational publishing house.
 
 Check the document page image provided against ONLY these style rules:
 
@@ -37,6 +31,43 @@ Schema:
 [{{"checkpoint_id": "cp_001", "quote": "...", "location": "Page {page_num}", "issue": "...", "suggestion": "..."}}]
 
 Return [] if no violations found on this page."""
+
+
+MATH_PROMPT = """You are a professional mathematics and pedagogy reviewer for LEAD, an educational publishing house.
+
+Review the document page image against these five error categories:
+
+[MATH ERROR - cp_037] - Verify facts, formulas, numerical computations, diagrams, and final answers
+[LANGUAGE ERROR - cp_038] - Check references, colors, spelling, grammar, word usage, and instruction clarity
+[PEDAGOGICAL ERROR - cp_039] - Check method alignment, grade-appropriateness, and skills taught
+[PRACTICAL FEASIBILITY ERROR - cp_040] - Verify examples/context are realistic and real data is correct
+[HIDDEN CURRICULUM ERROR - cp_041] - Check for bias, stereotyping, and socio-economic assumptions
+
+INSTRUCTIONS:
+- Read the page image carefully.
+- For each error category, flag EVERY issue you can see.
+- Use the checkpoint_id indicated for each category (cp_037 through cp_041).
+- Quote exact text from the page (20–80 characters).
+- Keep issue and suggestion fields to 15 words or fewer each.
+- Return a JSON array only. No markdown, no explanation.
+
+Schema:
+[{{"checkpoint_id": "cp_037", "quote": "...", "location": "Page {page_num}", "issue": "...", "suggestion": "..."}}]
+
+Return [] if no violations found on this page."""
+
+
+def _build_vision_prompt(checkpoints: list[dict], page_num: int, workflow_id: str = "edit") -> str:
+    """Build the vision AI prompt for checking a single page image."""
+    if workflow_id == "math":
+        return MATH_PROMPT.format(page_num=page_num)
+    else:
+        # Edit workflow (default)
+        rules = "\n".join(
+            f"{i + 1}. [{cp['id']}] {cp['name']}: {cp['description'].strip()}"
+            for i, cp in enumerate(checkpoints)
+        )
+        return EDIT_PROMPT.format(rules=rules, page_num=page_num)
 
 
 def _extract_complete_objects(text: str) -> list[dict]:
@@ -107,7 +138,7 @@ def _parse_response(raw: str) -> list[dict]:
     return _extract_complete_objects(raw)
 
 
-def _run_gemini_vision(image_bytes: bytes, checkpoints: list[dict], page_num: int, config: dict) -> list[dict]:
+def _run_gemini_vision(image_bytes: bytes, checkpoints: list[dict], page_num: int, config: dict, workflow_id: str = "edit") -> list[dict]:
     """Call Gemini with vision capabilities."""
     import google.generativeai as genai
 
@@ -129,13 +160,13 @@ def _run_gemini_vision(image_bytes: bytes, checkpoints: list[dict], page_num: in
     # Convert bytes to PIL Image
     image = Image.open(BytesIO(image_bytes))
 
-    prompt = _build_vision_prompt(checkpoints, page_num)
+    prompt = _build_vision_prompt(checkpoints, page_num, workflow_id)
     response = model.generate_content([prompt, image])
     findings = _parse_response(response.text)
     return findings
 
 
-def _run_anthropic_vision(image_bytes: bytes, checkpoints: list[dict], page_num: int, config: dict) -> list[dict]:
+def _run_anthropic_vision(image_bytes: bytes, checkpoints: list[dict], page_num: int, config: dict, workflow_id: str = "edit") -> list[dict]:
     """Call Anthropic Claude with vision capabilities."""
     import anthropic
     import base64
@@ -151,7 +182,7 @@ def _run_anthropic_vision(image_bytes: bytes, checkpoints: list[dict], page_num:
     # Encode image as base64
     image_data = base64.standard_b64encode(image_bytes).decode("utf-8")
 
-    prompt = _build_vision_prompt(checkpoints, page_num)
+    prompt = _build_vision_prompt(checkpoints, page_num, workflow_id)
     message = client.messages.create(
         model=config["model"],
         max_tokens=config["max_tokens"],
@@ -180,7 +211,7 @@ def _run_anthropic_vision(image_bytes: bytes, checkpoints: list[dict], page_num:
     return findings
 
 
-def run_vision_check(image_bytes: bytes, checkpoints: list[dict], page_num: int) -> list[dict]:
+def run_vision_check(image_bytes: bytes, checkpoints: list[dict], page_num: int, workflow_id: str = "edit") -> list[dict]:
     """
     Runs vision-based checking on a single page image.
 
@@ -188,6 +219,7 @@ def run_vision_check(image_bytes: bytes, checkpoints: list[dict], page_num: int)
         image_bytes: JPEG image bytes
         checkpoints: list of checkpoint dicts with 'id', 'name', 'description'
         page_num: page number (for location field in findings)
+        workflow_id: workflow identifier (e.g., 'edit', 'math')
 
     Returns:
         list of finding dicts, each with:
@@ -197,9 +229,9 @@ def run_vision_check(image_bytes: bytes, checkpoints: list[dict], page_num: int)
     provider = config.get("provider", "gemini")
 
     if provider == "gemini":
-        findings = _run_gemini_vision(image_bytes, checkpoints, page_num, config)
+        findings = _run_gemini_vision(image_bytes, checkpoints, page_num, config, workflow_id)
     elif provider == "anthropic":
-        findings = _run_anthropic_vision(image_bytes, checkpoints, page_num, config)
+        findings = _run_anthropic_vision(image_bytes, checkpoints, page_num, config, workflow_id)
     else:
         raise ValueError(
             f"Unsupported provider '{provider}' in config/model_config.yaml. "

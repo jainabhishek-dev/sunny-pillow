@@ -1,6 +1,15 @@
-# LEAD House Style Checkpoints
-# Source: House Style Guidelines V2
+# LEAD CheckPoint Checkpoints
+# Source: House Style Guidelines V2 + Math Review Framework
 # Each checkpoint maps to a specific, actionable rule that AI can check.
+
+# Workflows: Different review types for different use cases
+workflows:
+  - id: edit
+    name: Edit
+    description: Check for spelling, grammar, and style issues
+  - id: math
+    name: Math Reviews
+    description: Verify math accuracy, language, and pedagogy
 
 checkpoints:
 
@@ -16,6 +25,7 @@ checkpoints:
       'behaviour' (not 'behavior'), 'centre' (not 'center').
       Flag any American English spellings.
     type: rule
+    workflows: [edit]
 
   - id: cp_002
     category: Spelling
@@ -25,6 +35,7 @@ checkpoints:
       Use 'learned' (not 'learnt'), 'burned' (not 'burnt'), 'spelled' (not 'spelt'),
       'dreamed' (not 'dreamt'), 'leaped' (not 'leapt').
     type: rule
+    workflows: [edit]
 
   - id: cp_003
     category: Spelling
@@ -33,6 +44,7 @@ checkpoints:
       Use 'flowchart' (not 'flow chart') and 'waterbodies' (not 'water bodies').
       These are LEAD-specific single-word or compound spellings.
     type: rule
+    workflows: [edit]
 
   # â”€â”€â”€ 2. OXFORD (SERIAL) COMMA â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   - id: cp_004
@@ -44,6 +56,7 @@ checkpoints:
       Example correct: 'Tea, coffee, or milk.' Flag lists of 3+ items missing
       the comma before 'and' or 'or'.
     type: rule
+    workflows: [edit]
 
   # â”€â”€â”€ 3. ABBREVIATIONS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   - id: cp_005
@@ -55,6 +68,7 @@ checkpoints:
       Also, do not use full stops in abbreviated units of measurement.
       Correct: km, cm, mg. Incorrect: k.m., c.m.
     type: rule
+    workflows: [edit]
 
   - id: cp_006
     category: Abbreviations
@@ -63,6 +77,7 @@ checkpoints:
       Do not use an apostrophe when forming the plural of abbreviations.
       Correct: ATMs, MPs, CEOs. Incorrect: ATM's, MP's, CEO's.
     type: rule
+    workflows: [edit]
 
   - id: cp_007
     category: Abbreviations
@@ -71,6 +86,7 @@ checkpoints:
       Do not use a full stop after abbreviations that indicate titles.
       Correct: Dr, Mr, Mrs, Prof. Incorrect: Dr., Mr., Mrs., Prof.
     type: rule
+    workflows: [edit]
 
   - id: cp_008
     category: Abbreviations
@@ -80,6 +96,7 @@ checkpoints:
       Correct: 'The symptoms may last for a short period, i.e. from three to five days.'
       Incorrect: 'i.e., from three to five days.'
     type: rule
+    workflows: [edit]
 
   - id: cp_009
     category: Abbreviations
@@ -93,6 +110,7 @@ checkpoints:
       (4) 'etc.' always ends with a period and is not followed by a comma.
       (5) If 'etc.' ends a sentence, only one period is used.
     type: rule
+    workflows: [edit]
 
   # â”€â”€â”€ 4. QUOTATION MARKS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   - id: cp_010
@@ -106,6 +124,7 @@ checkpoints:
       Example: "Have you any idea what 'red mercury' is?"
       Flag incorrect use of double quotes where single should be used and vice versa.
     type: judgment
+    workflows: [edit]
 
   # â”€â”€â”€ 5. ELLIPSIS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   - id: cp_011
@@ -118,6 +137,7 @@ checkpoints:
       When the preceding sentence ends just before the ellipsis, retain that
       punctuation before the ellipsis.
     type: rule
+    workflows: [edit]
 
   # â”€â”€â”€ 6. HYPHEN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   - id: cp_012
@@ -128,6 +148,7 @@ checkpoints:
       em dashes (â€”). A hyphen is shorter and joins words; dashes separate
       clauses or indicate ranges. Flag any hyphen used where a dash is clearly needed.
     type: rule
+    workflows: [edit]
 
   - id: cp_013
     category: Punctuation
@@ -138,6 +159,7 @@ checkpoints:
       Do not hyphenate -ly adverbs before or after a noun: 'smartly dressed' (no hyphen).
       Do not use hyphens in noun phrases: 'Labour Party conference' (no hyphen).
     type: judgment
+    workflows: [edit]
 
   - id: cp_014
     category: Punctuation
@@ -150,6 +172,7 @@ checkpoints:
       'cooperate' and 'coordinate' should be spelt without a hyphen.
       'prerequisite' â€” no hyphen (not 'pre-requisite').
     type: rule
+    workflows: [edit]
 
   - id: cp_015
     category: Punctuation
@@ -158,6 +181,7 @@ checkpoints:
       Hyphenate all spelled-out fractions: 'two-thirds', 'one-half'.
       Hyphenate spelled-out numbers greater than twenty: 'twenty-one', 'thirty-three'.
     type: rule
+    workflows: [edit]
 
   # â”€â”€â”€ 7. COLON â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   - id: cp_016
@@ -174,6 +198,7 @@ checkpoints:
       Do not capitalise the word following a colon unless it is a proper noun
       or a complete sentence follows.
     type: judgment
+    workflows: [edit]
 
   # â”€â”€â”€ 8. DASHES â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   - id: cp_017
@@ -183,9 +208,10 @@ checkpoints:
       Use an en dash (â€“) â€” not a hyphen (-) â€” for:
       (1) Relationships between words (conflict, connection, direction): 'Northâ€“South corridor'.
       (2) Number/year ranges with no space before or after: 'slides 1â€“9', '1939â€“45'.
-      (3) Temperature/percentage ranges without space: '30Â°Câ€“50Â°C', '65%â€“70%'.
-      Page ranges: abbreviate as 'Pg.' and do not repeat it: 'Pg. 21â€“25' (not 'Pg. 21â€“Pg. 25').
+      (3) Temperature/percentage ranges without space: '30Â°Câ€”50Â°C', '65%â€”70%'.
+      Page ranges: abbreviate as 'Pg.' and do not repeat it: 'Pg. 21â€”25' (not 'Pg. 21â€”Pg. 25').
     type: rule
+    workflows: [edit]
 
   - id: cp_018
     category: Punctuation
@@ -197,6 +223,7 @@ checkpoints:
       Always add a space before and after the em dash.
       Example: 'The bakery offered three kinds â€” plain, almond, and chocolate â€” in their menu.'
     type: rule
+    workflows: [edit]
 
   # â”€â”€â”€ 9. CAPITALISATION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   - id: cp_019
@@ -210,6 +237,7 @@ checkpoints:
       'internet' must always be written with a lowercase 'i'.
       Flag any unnecessary capitalisation of common nouns.
     type: judgment
+    workflows: [edit]
 
   - id: cp_020
     category: Capitalisation
@@ -221,6 +249,7 @@ checkpoints:
       Flag: 'the Earth is home to life' (should be 'the earth');
       also flag: 'Venus is the same size as earth' (should be 'Earth').
     type: rule
+    workflows: [edit]
 
   - id: cp_021
     category: Capitalisation
@@ -229,6 +258,7 @@ checkpoints:
       The words 'sun' and 'moon' are only capitalised in pre-primary and
       primary (EVS) content. In all other content, use lowercase 'sun' and 'moon'.
     type: rule
+    workflows: [edit]
 
   # â”€â”€â”€ 10. TITLE CASING â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   - id: cp_022
@@ -243,6 +273,7 @@ checkpoints:
       and prepositions (in, of, on, at) â€” unless they are the first or last word.
       Flag headings that are not full sentences but are not in title case.
     type: rule
+    workflows: [edit]
 
   # â”€â”€â”€ 11. ITALICS, BOLD, ROMAN TEXT, SMALL CAPS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   - id: cp_023
@@ -255,6 +286,7 @@ checkpoints:
       Do NOT italicise: epics and names of holy books (Ramayana, Koran, Bible).
       Flag unitalicised scientific names or book/film titles.
     type: judgment
+    workflows: [edit]
 
   - id: cp_024
     category: Formatting
@@ -263,6 +295,7 @@ checkpoints:
       Commonly used Latin abbreviations (i.e., e.g., viz., etc.) must be written
       in Roman text (non-italics), not in italics.
     type: rule
+    workflows: [edit]
 
   - id: cp_025
     category: Formatting
@@ -273,6 +306,7 @@ checkpoints:
       apply small caps. Flag any CE/BCE/AD/BC that appears in regular font
       without being highlighted.
     type: rule
+    workflows: [edit]
 
   # â”€â”€â”€ 12. NUMBERS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   - id: cp_026
@@ -284,8 +318,9 @@ checkpoints:
       approximate numbers (words: 'at least a thousand'), and at the start of a
       sentence (words: 'Two hundred gold bars').
       Round numbers of a million or more use both: 'Â£8.5 million'.
-      Flag digit forms (1â€“9) used in running text where words are required.
+      Flag digit forms (1â€”9) used in running text where words are required.
     type: rule
+    workflows: [edit]
 
   # â”€â”€â”€ 13. FORMATTING FIGURES â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   - id: cp_027
@@ -298,6 +333,7 @@ checkpoints:
       point: '0.768' (not '.768').
       Flag numbers â‰¥1000 written without commas, and decimals < 1 without a leading zero.
     type: rule
+    workflows: [edit]
 
   # â”€â”€â”€ 14. DATES â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   - id: cp_028
@@ -310,6 +346,7 @@ checkpoints:
       Always use all four digits for years. Never place a comma between month and year.
       For decades, use numerals without apostrophe: '1960s' (not '1960's').
     type: rule
+    workflows: [edit]
 
   - id: cp_029
     category: Dates & Time
@@ -319,6 +356,7 @@ checkpoints:
       AD precedes the year ('AD 500'); BC, BCE, and CE follow the year ('800 CE', '500 BC').
       When providing a range of years, do not repeat the century: '1939â€“41' (not '1939â€“1941').
     type: rule
+    workflows: [edit]
 
   # â”€â”€â”€ 15. UNITS OF MEASUREMENT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   - id: cp_030
@@ -327,9 +365,10 @@ checkpoints:
     description: >
       When a numeral precedes a unit, always use the abbreviated form of the unit.
       Add a space between the number and the unit: '500 cm', '30 km', '25 mg'.
-      Abbreviations do not change in plural form: '500 cm' (not '500 cms').
-      Flag full-word units used after a numeral (e.g., '500 centimetres' â†’ '500 cm').
+      Abbreviations do not change in plural form: ‘500 cm’ (not ‘500 cms’).
+      Flag full-word units used after a numeral (e.g., ‘500 centimetres’ â†’ ‘500 cm’).
     type: rule
+    workflows: [edit]
 
   # â”€â”€â”€ 16. SYMBOLS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   - id: cp_031
@@ -344,6 +383,7 @@ checkpoints:
       (e.g., do not write 'Number of tickets = 128' in a prose sentence;
       write it as an equation only in mathematical context).
     type: rule
+    workflows: [edit]
 
   # â”€â”€â”€ 17. TIME â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   - id: cp_032
@@ -356,6 +396,7 @@ checkpoints:
       Time must be mentioned before day and date: 'at 4 pm on Friday' (not 'on Friday at 4 pm').
       If showing hours and minutes, keep the format consistent throughout: '7:10 am to 9:30 pm'.
     type: rule
+    workflows: [edit]
 
   # â”€â”€â”€ 18. NUMBERING OF QUESTIONS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   - id: cp_033
@@ -368,6 +409,7 @@ checkpoints:
       Sub-question options use: (a), (b), (c) at first level; (i), (ii), (iii) at second.
       Flag any question numbering that deviates from this hierarchical format.
     type: rule
+    workflows: [edit]
 
   # ─── 19. GRAMMAR & GENERAL ERRORS ───────────────────────────────────────────
   - id: cp_034
@@ -378,21 +420,85 @@ checkpoints:
       incorrect tense usage, misplaced modifiers, and sentence fragments. 
       Ensure sentences are clear and syntactically correct.
     type: judgment
+    workflows: [edit]
 
   - id: cp_035
     category: Spelling
     name: General spelling mistakes
     description: >
       Flag any clear spelling mistakes or typos that are not already covered 
-      by the British English rule. This includes common typos, transposed 
+      by the British English rule. This includes common typos, transposed
       letters, and missing characters.
     type: rule
+    workflows: [edit]
 
   - id: cp_036
     category: Grammar
     name: Repeated words
     description: >
-      Flag instances of unintentional repeated words (e.g., 'the the', 'is is', 
+      Flag instances of unintentional repeated words (e.g., 'the the', 'is is',
       'in in'). These often occur at line breaks or during editing.
     type: rule
+    workflows: [edit]
+
+  # ─── MATH REVIEWS WORKFLOW ────────────────────────────────────────────────
+
+  - id: cp_037
+    category: Math Content
+    name: Math Error
+    description: >
+      Verify mathematical facts, formulas, numerical computations, diagrams,
+      and final answers are correct. Check for calculation errors, incorrect
+      formulas, wrong mathematical concepts, or inaccurate diagrams. Flag any
+      mathematical inaccuracies, computational errors, or inconsistencies
+      between diagrams and text.
+    type: rule
+    workflows: [math]
+
+  - id: cp_038
+    category: Language & References
+    name: Language Error
+    description: >
+      Check references, color descriptions, spelling, grammar, word usage,
+      and instruction clarity. Ensure all references are accurate and complete,
+      color descriptions are precise and consistent, spelling and grammar follow
+      British English standards, and instructions are clear and unambiguous.
+      Flag any language, reference, or instruction errors.
+    type: judgment
+    workflows: [math]
+
+  - id: cp_039
+    category: Pedagogy
+    name: Pedagogical Error
+    description: >
+      Check method alignment with learning outcomes, grade-appropriateness of
+      content and language, and skills being taught. Ensure the problem-solving
+      method matches what students are expected to learn, the difficulty level
+      is appropriate for the grade, and the skills taught align with the
+      curriculum. Flag any pedagogical misalignment.
+    type: judgment
+    workflows: [math]
+
+  - id: cp_040
+    category: Practical Feasibility
+    name: Practical Feasibility Error
+    description: >
+      Verify that examples and context are realistic and practically feasible.
+      Check that real-world data used is accurate, measurements are realistic,
+      and procedures described can actually be performed as stated. Flag any
+      unrealistic examples, incorrect real-world data, or infeasible procedures.
+    type: rule
+    workflows: [math]
+
+  - id: cp_041
+    category: Inclusivity & Bias
+    name: Hidden Curriculum Error
+    description: >
+      Check for bias, stereotyping, or socio-economic assumptions in the content.
+      Flag references that stereotype groups based on gender, culture, race,
+      ability, or economic status. Ensure examples are inclusive and avoid
+      assumptions about family structure, resources, or cultural practices.
+      Flag any biased or exclusionary language or examples.
+    type: judgment
+    workflows: [math]
 
