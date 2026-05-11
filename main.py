@@ -7,7 +7,6 @@ from functools import partial
 from pathlib import Path
 from typing import Annotated
 
-import yaml
 from dotenv import load_dotenv
 from fastapi import FastAPI, Form, Request, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse, FileResponse
@@ -67,10 +66,10 @@ def _load_job(job_id: str) -> dict | None:
 # ── Startup: load checkpoints and workflows ───────────────────────────────────
 
 def _load_workflows() -> list[dict]:
-    path = Path(__file__).parent / "checkpoints.yaml"
-    with open(path, encoding="utf-8") as f:
-        data = yaml.safe_load(f)
-    return data.get("workflows", [])
+    return [
+        {"id": "edit", "name": "Editorial", "description": "Style, grammar, and editorial consistency checks"},
+        {"id": "math", "name": "Math", "description": "Mathematics, pedagogy, and feasibility checks"},
+    ]
 
 
 def _group_by_category(checkpoints: list[dict]) -> dict[str, list[dict]]:
@@ -93,27 +92,11 @@ def _reload_checkpoints() -> None:
     CATEGORIES = _group_by_category(CHECKPOINTS)
 
 
-def _load_checkpoints_from_yaml() -> list[dict]:
-    path = Path(__file__).parent / "checkpoints.yaml"
-    with open(path, encoding="utf-8") as f:
-        data = yaml.safe_load(f)
-    return data["checkpoints"]
-
-
-# Workflows stay in YAML (static config); checkpoints come from Supabase
 WORKFLOWS: list[dict] = _load_workflows()
 CHECKPOINTS: list[dict] = []
 CHECKPOINT_MAP: dict[str, dict] = {}
 CATEGORIES: dict[str, list[dict]] = {}
-
-try:
-    _reload_checkpoints()
-except Exception as _e:
-    import logging
-    logging.warning(f"Could not load checkpoints from Supabase ({_e}); falling back to YAML.")
-    CHECKPOINTS = _load_checkpoints_from_yaml()
-    CHECKPOINT_MAP = {cp["id"]: cp for cp in CHECKPOINTS}
-    CATEGORIES = _group_by_category(CHECKPOINTS)
+_reload_checkpoints()
 
 
 # ── Auth routes ───────────────────────────────────────────────────────────────

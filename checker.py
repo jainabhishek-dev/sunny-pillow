@@ -14,6 +14,7 @@ def _load_model_config() -> dict:
         return yaml.safe_load(f)
 
 
+
 EDIT_PROMPT = """You are a professional editorial checker for LEAD, an educational publishing house.
 
 Check the document page image provided against ONLY these style rules:
@@ -35,18 +36,14 @@ Return [] if no violations found on this page."""
 
 MATH_PROMPT = """You are a professional mathematics and pedagogy reviewer for LEAD, an educational publishing house.
 
-Review the document page image against these five error categories:
+Review the document page image against ONLY these error categories:
 
-[MATH ERROR - cp_037] - Verify facts, formulas, numerical computations, diagrams, and final answers
-[LANGUAGE ERROR - cp_038] - Check references, colors, spelling, grammar, word usage, and instruction clarity
-[PEDAGOGICAL ERROR - cp_039] - Check method alignment, grade-appropriateness, and skills taught
-[PRACTICAL FEASIBILITY ERROR - cp_040] - Verify examples/context are realistic and real data is correct
-[HIDDEN CURRICULUM ERROR - cp_041] - Check for bias, stereotyping, and socio-economic assumptions
+{rules}
 
 INSTRUCTIONS:
 - Read the page image carefully.
 - For each error category, flag EVERY issue you can see.
-- Use the checkpoint_id indicated for each category (cp_037 through cp_041).
+- Use the checkpoint_id shown in brackets for each category.
 - Quote exact text from the page (20–80 characters).
 - Keep issue and suggestion fields to 15 words or fewer each.
 - Return a JSON array only. No markdown, no explanation.
@@ -59,14 +56,13 @@ Return [] if no violations found on this page."""
 
 def _build_vision_prompt(checkpoints: list[dict], page_num: int, workflow_id: str = "edit") -> str:
     """Build the vision AI prompt for checking a single page image."""
+    rules = "\n".join(
+        f"{i + 1}. [{cp['id']}] {cp['name']}: {cp['description'].strip()}"
+        for i, cp in enumerate(checkpoints)
+    )
     if workflow_id == "math":
-        return MATH_PROMPT.format(page_num=page_num)
+        return MATH_PROMPT.format(rules=rules, page_num=page_num)
     else:
-        # Edit workflow (default)
-        rules = "\n".join(
-            f"{i + 1}. [{cp['id']}] {cp['name']}: {cp['description'].strip()}"
-            for i, cp in enumerate(checkpoints)
-        )
         return EDIT_PROMPT.format(rules=rules, page_num=page_num)
 
 
