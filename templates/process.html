@@ -120,7 +120,7 @@ function createPageCard(page, totalPages) {
   card.innerHTML = `
     <div class="flex h-full">
       <!-- Image column (50%) -->
-      <div class="w-1/2 bg-gray-100 p-4 overflow-auto max-h-96">
+      <div class="w-1/2 bg-gray-100 p-4">
         <div class="relative">
           <img
             src="/job/${jobId}/page/${String(page).padStart(3, '0')}"
@@ -133,7 +133,7 @@ function createPageCard(page, totalPages) {
         </div>
       </div>
       <!-- Findings column (50%) -->
-      <div class="w-1/2 p-4 overflow-auto max-h-96">
+      <div class="w-1/2 p-4">
         <div id="findings-${page}" class="space-y-3">
           <div class="text-center text-gray-500 py-4">
             <p class="text-sm">Processing page...</p>
