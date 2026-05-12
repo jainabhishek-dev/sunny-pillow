@@ -564,20 +564,16 @@ async def manage_checkpoints(request: Request):
     if not user:
         return RedirectResponse(url="/login")
 
-    by_workflow = {}
-    for workflow in WORKFLOWS:
-        wid = workflow["id"]
-        wcp = _filter_checkpoints_by_workflow(CHECKPOINTS, wid)
-        by_workflow[wid] = {
-            "workflow": workflow,
-            "categories": _group_by_category(wcp),
-        }
+    workflow_id = request.query_params.get("workflow", WORKFLOWS[0]["id"])
+    selected_workflow = next((w for w in WORKFLOWS if w["id"] == workflow_id), WORKFLOWS[0])
+    filtered = _filter_checkpoints_by_workflow(CHECKPOINTS, selected_workflow["id"])
 
     return templates.TemplateResponse("checkpoints.html", {
         "request": request,
         "user": user,
         "workflows": WORKFLOWS,
-        "by_workflow": by_workflow,
+        "selected_workflow": selected_workflow,
+        "categories": _group_by_category(filtered),
         "success": request.query_params.get("success"),
         "error": request.query_params.get("error"),
     })
@@ -598,6 +594,8 @@ async def add_checkpoint(
     new_id = _next_checkpoint_id()
     sort_order = max((cp["sort_order"] for cp in CHECKPOINTS), default=0) + 1
 
+    workflow_param = request.query_params.get("workflow", workflows[0] if workflows else "")
+    base = f"/checkpoints?workflow={workflow_param}"
     try:
         db.insert_checkpoint({
             "id": new_id,
@@ -608,9 +606,9 @@ async def add_checkpoint(
             "sort_order": sort_order,
         })
         _reload_checkpoints()
-        return RedirectResponse(url="/checkpoints?success=Checkpoint+added.", status_code=303)
+        return RedirectResponse(url=f"{base}&success=Checkpoint+added.", status_code=303)
     except Exception as exc:
-        return RedirectResponse(url=f"/checkpoints?error={exc}", status_code=303)
+        return RedirectResponse(url=f"{base}&error={exc}", status_code=303)
 
 
 @app.post("/checkpoints/{cp_id}/edit", response_class=HTMLResponse)
@@ -625,6 +623,8 @@ async def edit_checkpoint(
     if not user:
         return RedirectResponse(url="/login", status_code=303)
 
+    workflow_param = request.query_params.get("workflow", workflows[0] if workflows else "")
+    base = f"/checkpoints?workflow={workflow_param}"
     try:
         db.update_checkpoint(cp_id, {
             "instructions": instructions.strip(),
@@ -632,9 +632,9 @@ async def edit_checkpoint(
             "workflows": workflows,
         })
         _reload_checkpoints()
-        return RedirectResponse(url="/checkpoints?success=Checkpoint+updated.", status_code=303)
+        return RedirectResponse(url=f"{base}&success=Checkpoint+updated.", status_code=303)
     except Exception as exc:
-        return RedirectResponse(url=f"/checkpoints?error={exc}", status_code=303)
+        return RedirectResponse(url=f"{base}&error={exc}", status_code=303)
 
 
 @app.post("/checkpoints/{cp_id}/delete", response_class=HTMLResponse)
@@ -643,9 +643,11 @@ async def delete_checkpoint(request: Request, cp_id: str):
     if not user:
         return RedirectResponse(url="/login", status_code=303)
 
+    workflow_param = request.query_params.get("workflow", "")
+    base = f"/checkpoints?workflow={workflow_param}" if workflow_param else "/checkpoints"
     try:
         db.delete_checkpoint(cp_id)
         _reload_checkpoints()
-        return RedirectResponse(url="/checkpoints?success=Checkpoint+deleted.", status_code=303)
+        return RedirectResponse(url=f"{base}&success=Checkpoint+deleted.", status_code=303)
     except Exception as exc:
-        return RedirectResponse(url=f"/checkpoints?error={exc}", status_code=303)
+        return RedirectResponse(url=f"{base}&error={exc}", status_code=303)
