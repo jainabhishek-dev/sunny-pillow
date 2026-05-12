@@ -16,7 +16,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 import auth
 import db
-from checker import run_vision_check, run_vision_review
+from checker import run_vision_check, run_vision_review, run_document_check, run_document_review
 from commenter import post_selected_comments
 from reader import get_file_as_pdf, get_pdf_bytes_by_id
 
@@ -431,7 +431,7 @@ async def _stream_processing(job_id: str, token: dict, retry_from: int = None) -
             # Stop processing
             return
 
-    # Save findings to findings.json
+    # Save page findings to findings.json
     try:
         (job_dir / "findings.json").write_text(
             json.dumps(all_findings, ensure_ascii=False),
@@ -440,12 +440,51 @@ async def _stream_processing(job_id: str, token: dict, retry_from: int = None) -
     except Exception as e:
         yield f"event: error\ndata: {json.dumps({'message': f'Could not save findings: {str(e)}'})}\n\n"
 
-    # Send done event
+    # Send done event (pages complete — stream stays open for document-level)
     yield f"event: done\ndata: {json.dumps({'total_findings': len(all_findings)})}\n\n"
+
+    # ── Document-level check ──────────────────────────────────────────────────
+    doc_checkpoints = [cp for cp in selected_checkpoints if cp.get("scope") == "document"]
+
+    if doc_checkpoints:
+        yield f"event: document_start\ndata: {json.dumps({})}\n\n"
+
+        try:
+            doc_findings = await loop.run_in_executor(
+                None, partial(run_document_check, pdf_bytes, doc_checkpoints)
+            )
+
+            # Assign IDs continuing from page findings
+            for finding in doc_findings:
+                finding["id"] = finding_id_counter
+                finding.setdefault("location", "Document")
+                all_findings.append(finding)
+                finding_id_counter += 1
+
+            yield f"event: document_findings\ndata: {json.dumps({'findings': doc_findings})}\n\n"
+
+            # Document review pass
+            if doc_findings:
+                doc_reviews = await loop.run_in_executor(
+                    None, partial(run_document_review, pdf_bytes, doc_findings)
+                )
+                yield f"event: document_review\ndata: {json.dumps({'reviews': doc_reviews})}\n\n"
+
+            # Persist updated findings
+            (job_dir / "findings.json").write_text(
+                json.dumps(all_findings, ensure_ascii=False),
+                encoding="utf-8"
+            )
+
+        except Exception as e:
+            yield f"event: error\ndata: {json.dumps({'message': f'Document-level check failed: {str(e)}'})}\n\n"
+
+    # Send all_done to close the stream
+    yield f"event: all_done\ndata: {json.dumps({'total_findings': len(all_findings)})}\n\n"
 
     # Update job status
     job["status"] = "completed"
-    job.pop("last_successful_page", None)  # Clear retry state on success
+    job.pop("last_successful_page", None)
     _save_job(job_id, job)
 
 
@@ -592,6 +631,7 @@ async def add_checkpoint(
     category: Annotated[str, Form()],
     instructions: Annotated[str, Form()],
     type: Annotated[str, Form()],
+    scope: Annotated[str, Form()],
     workflows: Annotated[list[str], Form()],
 ):
     user = auth.get_current_user(request)
@@ -609,6 +649,7 @@ async def add_checkpoint(
             "category": category.strip(),
             "instructions": instructions.strip(),
             "type": type,
+            "scope": scope,
             "workflows": workflows,
             "sort_order": sort_order,
         })
@@ -624,6 +665,7 @@ async def edit_checkpoint(
     cp_id: str,
     instructions: Annotated[str, Form()],
     type: Annotated[str, Form()],
+    scope: Annotated[str, Form()],
     workflows: Annotated[list[str], Form()],
 ):
     user = auth.get_current_user(request)
@@ -636,6 +678,7 @@ async def edit_checkpoint(
         db.update_checkpoint(cp_id, {
             "instructions": instructions.strip(),
             "type": type,
+            "scope": scope,
             "workflows": workflows,
         })
         _reload_checkpoints()

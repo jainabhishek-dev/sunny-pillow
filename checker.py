@@ -315,6 +315,145 @@ def run_vision_review(image_bytes: bytes, findings: list[dict], page_num: int) -
     return [r for r in reviews if isinstance(r, dict) and required_keys.issubset(r.keys())]
 
 
+# ── Document-level check (full PDF as input) ──────────────────────────────────
+
+DOCUMENT_PROMPT = """You are a professional reviewer for LEAD, an educational publishing house.
+
+Review the ENTIRE document against ONLY these consistency checks:
+
+{rules}
+
+INSTRUCTIONS:
+- Read the full document carefully across all pages.
+- For each rule, flag EVERY violation you can find.
+- Quote exact text from the document (20–80 characters).
+- Include the page number in the location field where possible (e.g. "Page 3").
+- Keep issue and suggestion fields to 15 words or fewer each.
+- Return a JSON array only. No markdown, no explanation.
+
+Schema:
+[{{"checkpoint_id": "cp_052", "quote": "...", "location": "Page X", "issue": "...", "suggestion": "..."}}]
+
+Return [] if no violations found."""
+
+DOCUMENT_REVIEW_PROMPT = """You are a quality reviewer for LEAD, an educational publishing house.
+
+A reviewer has flagged the following potential errors in this document. Examine the document carefully and verify each one.
+
+Findings to review:
+{findings_list}
+
+For each finding:
+- Return "valid" if the quoted text is present in the document AND the described issue is correct.
+- Return "invalid" if the quote cannot be found, or the issue is incorrect or exaggerated.
+
+Return a JSON array only. No markdown, no explanation.
+Schema:
+[{{"finding_id": 1, "verdict": "valid", "reason": "..."}}]
+
+Keep reason to 10 words or fewer."""
+
+
+def _build_document_prompt(checkpoints: list[dict]) -> str:
+    rules = "\n".join(
+        f"{i + 1}. [{cp['id']}] {cp['instructions'].strip()}"
+        for i, cp in enumerate(checkpoints)
+    )
+    return DOCUMENT_PROMPT.format(rules=rules)
+
+
+def _build_document_review_prompt(findings: list[dict]) -> str:
+    lines = [
+        f'{i + 1}. [finding_id: {f["id"]}] Quote: "{f["quote"]}" | Issue: {f["issue"]}'
+        for i, f in enumerate(findings)
+    ]
+    return DOCUMENT_REVIEW_PROMPT.format(findings_list="\n".join(lines))
+
+
+def _run_gemini_document(pdf_bytes: bytes, prompt: str, config: dict) -> list[dict]:
+    import google.generativeai as genai
+    import base64
+    api_key = os.getenv(config["api_key_env"])
+    if not api_key:
+        raise RuntimeError(f"API key not found. Set '{config['api_key_env']}'.")
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel(
+        model_name=config["model"],
+        generation_config=genai.types.GenerationConfig(
+            temperature=config["temperature"],
+            max_output_tokens=config["max_tokens"],
+        ),
+    )
+    pdf_data = base64.standard_b64encode(pdf_bytes).decode("utf-8")
+    response = model.generate_content([
+        {"mime_type": "application/pdf", "data": pdf_data},
+        prompt,
+    ])
+    return _parse_response(response.text)
+
+
+def _run_anthropic_document(pdf_bytes: bytes, prompt: str, config: dict) -> list[dict]:
+    import anthropic
+    import base64
+    api_key = os.getenv(config["api_key_env"])
+    if not api_key:
+        raise RuntimeError(f"API key not found. Set '{config['api_key_env']}'.")
+    client = anthropic.Anthropic(api_key=api_key)
+    pdf_data = base64.standard_b64encode(pdf_bytes).decode("utf-8")
+    message = client.messages.create(
+        model=config["model"],
+        max_tokens=config["max_tokens"],
+        messages=[{
+            "role": "user",
+            "content": [
+                {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": pdf_data}},
+                {"type": "text", "text": prompt},
+            ],
+        }],
+    )
+    return _parse_response(message.content[0].text)
+
+
+def run_document_check(pdf_bytes: bytes, checkpoints: list[dict]) -> list[dict]:
+    """
+    Document-level check: sends the full PDF to the AI with document-scope checkpoints.
+    Returns findings list same schema as run_vision_check.
+    """
+    if not checkpoints:
+        return []
+    config = _load_model_config()
+    provider = config.get("provider", "gemini")
+    prompt = _build_document_prompt(checkpoints)
+    if provider == "gemini":
+        findings = _run_gemini_document(pdf_bytes, prompt, config)
+    elif provider == "anthropic":
+        findings = _run_anthropic_document(pdf_bytes, prompt, config)
+    else:
+        return []
+    required_keys = {"checkpoint_id", "quote", "location", "issue", "suggestion"}
+    return [f for f in findings if isinstance(f, dict) and required_keys.issubset(f.keys())]
+
+
+def run_document_review(pdf_bytes: bytes, findings: list[dict]) -> list[dict]:
+    """
+    Second-pass review for document-level findings using the same PDF.
+    Skipped automatically if findings is empty.
+    """
+    if not findings:
+        return []
+    config = _load_model_config()
+    provider = config.get("provider", "gemini")
+    prompt = _build_document_review_prompt(findings)
+    if provider == "gemini":
+        reviews = _run_gemini_document(pdf_bytes, prompt, config)
+    elif provider == "anthropic":
+        reviews = _run_anthropic_document(pdf_bytes, prompt, config)
+    else:
+        return []
+    required_keys = {"finding_id", "verdict", "reason"}
+    return [r for r in reviews if isinstance(r, dict) and required_keys.issubset(r.keys())]
+
+
 def run_vision_check(image_bytes: bytes, checkpoints: list[dict], page_num: int, workflow_id: str = "edit") -> list[dict]:
     """
     Runs vision-based checking on a single page image.

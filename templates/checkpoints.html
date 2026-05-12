@@ -58,13 +58,21 @@
         class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"></textarea>
     </div>
 
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
       <div>
         <label class="block text-xs font-semibold text-gray-600 mb-1">Type</label>
         <select name="type" required
           class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400">
           <option value="rule">rule</option>
           <option value="judgment">judgment</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-gray-600 mb-1">Scope</label>
+        <select name="scope" required
+          class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400">
+          <option value="page">Page</option>
+          <option value="document">Document</option>
         </select>
       </div>
       <div>
@@ -112,6 +120,9 @@
               {% if cp.type == 'rule' %}bg-blue-50 text-blue-600{% else %}bg-amber-50 text-amber-600{% endif %}">
               {{ cp.type }}
             </span>
+            {% if cp.scope == 'document' %}
+            <span class="text-xs px-1.5 py-0.5 rounded-full bg-purple-50 text-purple-600">document</span>
+            {% endif %}
             <span class="text-xs text-gray-400">{{ cp.id }}</span>
           </div>
           <p class="text-xs text-gray-500 mt-0.5 leading-relaxed">{{ cp.instructions | truncate(140) }}</p>
@@ -142,13 +153,21 @@
               class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400">{{ cp.instructions }}</textarea>
           </div>
 
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div>
               <label class="block text-xs font-semibold text-gray-600 mb-1">Type</label>
               <select name="type"
                 class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400">
                 <option value="rule" {% if cp.type == 'rule' %}selected{% endif %}>rule</option>
                 <option value="judgment" {% if cp.type == 'judgment' %}selected{% endif %}>judgment</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-gray-600 mb-1">Scope</label>
+              <select name="scope"
+                class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400">
+                <option value="page" {% if cp.scope == 'page' or not cp.scope %}selected{% endif %}>Page</option>
+                <option value="document" {% if cp.scope == 'document' %}selected{% endif %}>Document</option>
               </select>
             </div>
             <div>

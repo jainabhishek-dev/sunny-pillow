@@ -153,7 +153,6 @@ const eventSource = new EventSource(streamUrl);
 
 eventSource.addEventListener('start', (event) => {
   const data = JSON.parse(event.data);
-  console.log(`Processing ${data.total_pages} pages...`);
   totalPages = data.total_pages;
   pageFindings = {};
   allFindingsFlat = [];
@@ -164,6 +163,13 @@ eventSource.addEventListener('start', (event) => {
   container.innerHTML = '';
   document.getElementById('error-message').classList.add('hidden');
   document.getElementById('retry-button').classList.add('hidden');
+
+  if (totalPages > 100) {
+    const warn = document.createElement('div');
+    warn.className = 'mb-4 bg-amber-50 border border-amber-200 text-amber-800 rounded-lg px-4 py-3 text-sm';
+    warn.textContent = `This document has ${totalPages} pages. Document-level checks support up to 100 pages for some providers — results may be partial.`;
+    container.before(warn);
+  }
 });
 
 eventSource.addEventListener('page_ready', (event) => {
@@ -238,6 +244,81 @@ eventSource.addEventListener('page_review', (event) => {
 });
 
 eventSource.addEventListener('done', (event) => {
+  document.getElementById('status-text').textContent = 'Pages complete — checking document...';
+});
+
+eventSource.addEventListener('document_start', (event) => {
+  const card = document.createElement('div');
+  card.id = 'document-card';
+  card.className = 'border border-purple-200 rounded-lg bg-white shadow-sm overflow-hidden';
+  card.innerHTML = `
+    <div class="px-4 py-3 bg-purple-50 border-b border-purple-100 flex items-center gap-2">
+      <span class="text-sm font-semibold text-purple-700">Document-level findings</span>
+      <span class="text-xs text-purple-400">Checking full document...</span>
+    </div>
+    <div id="document-findings" class="p-4">
+      <div class="flex items-center gap-2 text-gray-500 text-sm">
+        <div class="animate-spin w-4 h-4 border-2 border-purple-200 border-t-purple-600 rounded-full"></div>
+        <span>Processing document...</span>
+      </div>
+    </div>
+  `;
+  document.getElementById('pages-container').appendChild(card);
+});
+
+eventSource.addEventListener('document_findings', (event) => {
+  const data = JSON.parse(event.data);
+  const { findings } = data;
+  const findingsDiv = document.getElementById('document-findings');
+
+  document.getElementById('footer').classList.remove('hidden');
+
+  if (findings.length === 0) {
+    findingsDiv.innerHTML = '<div class="text-center text-green-600 py-4 text-sm">✓ No document-level errors found</div>';
+  } else {
+    findingsDiv.innerHTML = '';
+    const list = document.createElement('div');
+    list.className = 'space-y-3';
+    for (const finding of findings) {
+      allFindingsFlat.push(finding);
+      selectedFindingIds.add(finding.id);
+      list.appendChild(createFindingElement(finding));
+    }
+    findingsDiv.appendChild(list);
+    updateCounts();
+  }
+});
+
+eventSource.addEventListener('document_review', (event) => {
+  const data = JSON.parse(event.data);
+  const { reviews } = data;
+
+  for (const review of reviews) {
+    const checkbox = document.querySelector(`[data-finding-id="${review.finding_id}"]`);
+    if (!checkbox) continue;
+    const findingDiv = checkbox.closest('.border');
+    if (!findingDiv) continue;
+
+    const isValid = review.verdict === 'valid';
+    const badge = document.createElement('div');
+    badge.className = 'mt-2 flex items-center gap-2';
+    badge.innerHTML = `
+      <span class="text-xs px-2 py-0.5 rounded-full font-semibold ${isValid ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">
+        ${isValid ? '✓ Valid' : '✗ Invalid'}
+      </span>
+      <span class="text-xs text-gray-400">${escapeHtml(review.reason)}</span>
+    `;
+    findingDiv.querySelector('.flex-1').appendChild(badge);
+
+    if (!isValid && checkbox.checked) {
+      checkbox.checked = false;
+      selectedFindingIds.delete(review.finding_id);
+      updateCounts();
+    }
+  }
+});
+
+eventSource.addEventListener('all_done', (event) => {
   const data = JSON.parse(event.data);
   const count = data.total_findings;
   document.getElementById('status-text').textContent =

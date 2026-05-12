@@ -119,6 +119,9 @@
                   {% if cp.type == 'rule' %}bg-blue-50 text-blue-600{% else %}bg-amber-50 text-amber-600{% endif %}">
                   {{ cp.type }}
                 </span>
+                {% if cp.scope == 'document' %}
+                <span class="text-xs px-1.5 py-0.5 rounded-full bg-purple-50 text-purple-600">document</span>
+                {% endif %}
               </div>
               <p class="text-xs text-gray-500 mt-0.5 leading-relaxed">
                 {{ cp.instructions | truncate(120) }}
