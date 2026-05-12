@@ -16,7 +16,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 import auth
 import db
-from checker import run_vision_check
+from checker import run_vision_check, run_vision_review
 from commenter import post_selected_comments
 from reader import get_file_as_pdf, get_pdf_bytes_by_id
 
@@ -399,6 +399,13 @@ async def _stream_processing(job_id: str, token: dict, retry_from: int = None) -
 
             # Send page_findings event
             yield f"event: page_findings\ndata: {json.dumps({'page': page_num, 'findings': findings})}\n\n"
+
+            # Second-pass review (skipped if no findings on this page)
+            if findings:
+                reviews = await loop.run_in_executor(
+                    None, partial(run_vision_review, img_bytes, findings, page_num)
+                )
+                yield f"event: page_review\ndata: {json.dumps({'page': page_num, 'reviews': reviews})}\n\n"
 
         except Exception as e:
             # On error: save state, send partial_complete event, and stop processing

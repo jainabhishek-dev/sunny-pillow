@@ -207,6 +207,36 @@ eventSource.addEventListener('page_findings', (event) => {
   updateCounts();
 });
 
+eventSource.addEventListener('page_review', (event) => {
+  const data = JSON.parse(event.data);
+  const { reviews } = data;
+
+  for (const review of reviews) {
+    const checkbox = document.querySelector(`[data-finding-id="${review.finding_id}"]`);
+    if (!checkbox) continue;
+    const findingDiv = checkbox.closest('.border');
+    if (!findingDiv) continue;
+
+    const isValid = review.verdict === 'valid';
+
+    const badge = document.createElement('div');
+    badge.className = 'mt-2 flex items-center gap-2';
+    badge.innerHTML = `
+      <span class="text-xs px-2 py-0.5 rounded-full font-semibold ${isValid ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">
+        ${isValid ? '✓ Valid' : '✗ Invalid'}
+      </span>
+      <span class="text-xs text-gray-400">${escapeHtml(review.reason)}</span>
+    `;
+    findingDiv.querySelector('.flex-1').appendChild(badge);
+
+    if (!isValid && checkbox.checked) {
+      checkbox.checked = false;
+      selectedFindingIds.delete(review.finding_id);
+      updateCounts();
+    }
+  }
+});
+
 eventSource.addEventListener('done', (event) => {
   const data = JSON.parse(event.data);
   const count = data.total_findings;

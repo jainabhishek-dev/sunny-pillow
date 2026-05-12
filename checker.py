@@ -207,6 +207,114 @@ def _run_anthropic_vision(image_bytes: bytes, checkpoints: list[dict], page_num:
     return findings
 
 
+REVIEW_PROMPT = """You are a quality reviewer for LEAD, an educational publishing house.
+
+A vision AI has flagged the following potential errors on this page. Examine the page image carefully and verify each one.
+
+Findings to review:
+{findings_list}
+
+For each finding:
+- Return "valid" if the quoted text is visible on the page AND the described issue is correct.
+- Return "invalid" if the quote cannot be found on the page, or the issue is incorrect or exaggerated.
+
+Return a JSON array only. No markdown, no explanation.
+Schema:
+[{{"finding_id": 1, "verdict": "valid", "reason": "..."}}]
+
+Keep reason to 10 words or fewer."""
+
+
+def _build_review_prompt(findings: list[dict]) -> str:
+    lines = [
+        f'{i + 1}. [finding_id: {f["id"]}] Quote: "{f["quote"]}" | Issue: {f["issue"]}'
+        for i, f in enumerate(findings)
+    ]
+    return REVIEW_PROMPT.format(findings_list="\n".join(lines))
+
+
+def _parse_review_response(raw: str) -> list[dict]:
+    raw = raw.strip()
+    raw = re.sub(r"^```(?:json)?\s*", "", raw)
+    raw = re.sub(r"\s*```$", "", raw)
+    raw = raw.strip()
+    try:
+        result = json.loads(raw)
+        if isinstance(result, list):
+            return result
+        return []
+    except json.JSONDecodeError:
+        pass
+    match = re.search(r"\[.*\]", raw, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group())
+        except json.JSONDecodeError:
+            pass
+    return _extract_complete_objects(raw)
+
+
+def _run_gemini_review(image_bytes: bytes, prompt: str, config: dict) -> list[dict]:
+    import google.generativeai as genai
+    api_key = os.getenv(config["api_key_env"])
+    if not api_key:
+        raise RuntimeError(f"API key not found. Set '{config['api_key_env']}'.")
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel(
+        model_name=config["model"],
+        generation_config=genai.types.GenerationConfig(
+            temperature=config["temperature"],
+            max_output_tokens=config["max_tokens"],
+        ),
+    )
+    image = Image.open(BytesIO(image_bytes))
+    response = model.generate_content([prompt, image])
+    return _parse_review_response(response.text)
+
+
+def _run_anthropic_review(image_bytes: bytes, prompt: str, config: dict) -> list[dict]:
+    import anthropic
+    import base64
+    api_key = os.getenv(config["api_key_env"])
+    if not api_key:
+        raise RuntimeError(f"API key not found. Set '{config['api_key_env']}'.")
+    client = anthropic.Anthropic(api_key=api_key)
+    image_data = base64.standard_b64encode(image_bytes).decode("utf-8")
+    message = client.messages.create(
+        model=config["model"],
+        max_tokens=config["max_tokens"],
+        messages=[{
+            "role": "user",
+            "content": [
+                {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": image_data}},
+                {"type": "text", "text": prompt},
+            ],
+        }],
+    )
+    return _parse_review_response(message.content[0].text)
+
+
+def run_vision_review(image_bytes: bytes, findings: list[dict], page_num: int) -> list[dict]:
+    """
+    Second-pass review: validates each finding from the first pass.
+    Returns list of {finding_id, verdict, reason} dicts.
+    Skipped automatically if findings is empty.
+    """
+    if not findings:
+        return []
+    config = _load_model_config()
+    provider = config.get("provider", "gemini")
+    prompt = _build_review_prompt(findings)
+    if provider == "gemini":
+        reviews = _run_gemini_review(image_bytes, prompt, config)
+    elif provider == "anthropic":
+        reviews = _run_anthropic_review(image_bytes, prompt, config)
+    else:
+        return []
+    required_keys = {"finding_id", "verdict", "reason"}
+    return [r for r in reviews if isinstance(r, dict) and required_keys.issubset(r.keys())]
+
+
 def run_vision_check(image_bytes: bytes, checkpoints: list[dict], page_num: int, workflow_id: str = "edit") -> list[dict]:
     """
     Runs vision-based checking on a single page image.
