@@ -54,6 +54,26 @@ Schema:
 Return [] if no violations found on this page."""
 
 
+HSE_PROMPT = """You are a professional content reviewer for LEAD, an educational publishing house specialising in Humans, Society, and Earth (HSE) materials.
+
+Review the document page image against ONLY these error categories:
+
+{rules}
+
+INSTRUCTIONS:
+- Read the page image carefully.
+- For each error category, flag EVERY issue you can see.
+- Use the checkpoint_id shown in brackets for each category.
+- Quote exact text from the page (20–80 characters). For visual issues (images, layout), quote the nearest caption or label instead.
+- Keep issue and suggestion fields to 15 words or fewer each.
+- Return a JSON array only. No markdown, no explanation.
+
+Schema:
+[{{"checkpoint_id": "cp_064", "quote": "...", "location": "Page {page_num}", "issue": "...", "suggestion": "..."}}]
+
+Return [] if no violations found on this page."""
+
+
 def _build_vision_prompt(checkpoints: list[dict], page_num: int, workflow_id: str = "edit") -> str:
     """Build the vision AI prompt for checking a single page image."""
     rules = "\n".join(
@@ -62,6 +82,8 @@ def _build_vision_prompt(checkpoints: list[dict], page_num: int, workflow_id: st
     )
     if workflow_id == "math":
         return MATH_PROMPT.format(rules=rules, page_num=page_num)
+    elif workflow_id == "hse":
+        return HSE_PROMPT.format(rules=rules, page_num=page_num)
     else:
         return EDIT_PROMPT.format(rules=rules, page_num=page_num)
 
