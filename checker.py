@@ -80,7 +80,7 @@ def _build_vision_prompt(checkpoints: list[dict], page_num: int, workflow_id: st
         f"{i + 1}. [{cp['id']}] {cp['instructions'].strip()}"
         for i, cp in enumerate(checkpoints)
     )
-    if workflow_id in ("math", "mae_and_mathematica", "umq"):
+    if workflow_id in ("math", "mae_and_mathematica", "ump"):
         return MATH_PROMPT.format(rules=rules, page_num=page_num)
     elif workflow_id == "hse":
         return HSE_PROMPT.format(rules=rules, page_num=page_num)
