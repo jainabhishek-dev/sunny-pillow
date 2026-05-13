@@ -68,7 +68,8 @@ def _load_job(job_id: str) -> dict | None:
 def _load_workflows() -> list[dict]:
     return [
         {"id": "edit", "name": "Editorial", "description": "Style, grammar, and editorial consistency checks"},
-        {"id": "math", "name": "Math", "description": "Mathematics, pedagogy, and feasibility checks"},
+        {"id": "mae_and_mathematica", "name": "MAE and Mathematica", "description": "Mathematics, pedagogy, and feasibility checks"},
+        {"id": "umq", "name": "UMQ", "description": "Universal Mathematics Quest — mathematics, pedagogy, and feasibility checks"},
         {"id": "hse", "name": "HSE", "description": "Humans, Society & Earth content quality checks"},
     ]
 
