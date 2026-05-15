@@ -73,6 +73,66 @@ def delete_checkpoint(cp_id: str) -> None:
     resp.raise_for_status()
 
 
+# ── Workflow helpers ──────────────────────────────────────────────────────────
+
+def fetch_all_workflows() -> list[dict]:
+    resp = httpx.get(
+        f"{_base_url()}/workflows",
+        headers=_headers(),
+        params={"order": "sort_order"},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def insert_workflow(row: dict) -> dict:
+    resp = httpx.post(
+        f"{_base_url()}/workflows",
+        headers=_headers(),
+        json=row,
+        timeout=10,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    return data[0] if isinstance(data, list) else data
+
+
+def update_workflow(wf_id: str, fields: dict) -> dict:
+    resp = httpx.patch(
+        f"{_base_url()}/workflows",
+        headers=_headers(),
+        params={"id": f"eq.{wf_id}"},
+        json=fields,
+        timeout=10,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    return data[0] if isinstance(data, list) else data
+
+
+def delete_workflow(wf_id: str) -> None:
+    resp = httpx.delete(
+        f"{_base_url()}/workflows",
+        headers=_headers(),
+        params={"id": f"eq.{wf_id}"},
+        timeout=10,
+    )
+    resp.raise_for_status()
+
+
+def fetch_checkpoints_by_workflow(wf_id: str) -> list[dict]:
+    """Fetch all checkpoints whose workflows array contains wf_id."""
+    resp = httpx.get(
+        f"{_base_url()}/checkpoints",
+        headers=_headers(),
+        params={"workflows": f'cs.{{"{wf_id}"}}'},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
 # ── Admin helpers ─────────────────────────────────────────────────────────────
 
 def fetch_all_admins() -> list[dict]:

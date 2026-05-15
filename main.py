@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import re
 import tempfile
 import uuid
 from functools import partial
@@ -16,7 +17,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 import auth
 import db
-from checker import run_vision_check, run_vision_review, run_document_check, run_document_review
+from checker import run_vision_check, run_vision_review, run_document_check, run_document_review, generate_workflow_content
 from commenter import post_selected_comments
 from reader import get_file_as_pdf, get_pdf_bytes_by_id
 
@@ -65,13 +66,13 @@ def _load_job(job_id: str) -> dict | None:
 
 # ── Startup: load checkpoints and workflows ───────────────────────────────────
 
-def _load_workflows() -> list[dict]:
-    return [
-        {"id": "edit", "name": "Editorial", "description": "Style, grammar, and editorial consistency checks"},
-        {"id": "mae_and_mathematica", "name": "MAE and Mathematica", "description": "Mathematics, pedagogy, and feasibility checks"},
-        {"id": "ump", "name": "UMP", "description": "Universal Math Pro — mathematics, pedagogy, and feasibility checks"},
-        {"id": "hse", "name": "HSE", "description": "Humans, Society & Earth content quality checks"},
-    ]
+def _slugify(name: str) -> str:
+    """Generate a lowercase, underscore-separated ID from a workflow name."""
+    slug = name.lower().strip()
+    slug = re.sub(r"[^\w\s]", "", slug)   # strip punctuation
+    slug = re.sub(r"\s+", "_", slug)       # spaces → underscore
+    slug = re.sub(r"_+", "_", slug)        # collapse consecutive underscores
+    return slug.strip("_")
 
 
 def _group_by_category(checkpoints: list[dict]) -> dict[str, list[dict]]:
@@ -94,10 +95,17 @@ def _reload_checkpoints() -> None:
     CATEGORIES = _group_by_category(CHECKPOINTS)
 
 
-WORKFLOWS: list[dict] = _load_workflows()
+def _reload_workflows() -> None:
+    """Reload workflows from Supabase into global state."""
+    global WORKFLOWS
+    WORKFLOWS = db.fetch_all_workflows()
+
+
+WORKFLOWS: list[dict] = []
 CHECKPOINTS: list[dict] = []
 CHECKPOINT_MAP: dict[str, dict] = {}
 CATEGORIES: dict[str, list[dict]] = {}
+_reload_workflows()
 _reload_checkpoints()
 
 # ── Role-based access ─────────────────────────────────────────────────────────
@@ -122,6 +130,26 @@ def _is_admin(user: dict | None) -> bool:
     return bool(user) and (
         user.get("email") == SUPER_ADMIN or user.get("email") in ADMINS
     )
+
+
+def _cascade_delete_workflow(wf_id: str) -> None:
+    """
+    Delete a workflow and handle its checkpoints:
+    - Checkpoints belonging ONLY to this workflow are deleted entirely.
+    - Checkpoints shared with other workflows have this workflow removed from
+      their workflows array (they remain intact for the other workflows).
+    Reloads both CHECKPOINTS and WORKFLOWS globals after completion.
+    """
+    checkpoints = db.fetch_checkpoints_by_workflow(wf_id)
+    for cp in checkpoints:
+        remaining = [w for w in cp.get("workflows", []) if w != wf_id]
+        if remaining:
+            db.update_checkpoint(cp["id"], {"workflows": remaining})
+        else:
+            db.delete_checkpoint(cp["id"])
+    db.delete_workflow(wf_id)
+    _reload_checkpoints()
+    _reload_workflows()
 
 
 def _ctx(request: Request, user: dict | None, **kwargs) -> dict:
@@ -332,6 +360,19 @@ async def _stream_processing(job_id: str, token: dict, retry_from: int = None) -
         yield f"event: error\ndata: {json.dumps({'message': 'Job not found'})}\n\n"
         return
 
+    # Resolve system_prompt from the current WORKFLOWS global.
+    # This must be done before any PDF work so we fail fast if the workflow
+    # has been deleted or its prompt has not yet been configured.
+    workflow_id = job.get("workflow_id", "")
+    workflow = next((w for w in WORKFLOWS if w["id"] == workflow_id), None)
+    if not workflow:
+        yield f"event: error\ndata: {json.dumps({'message': f'Workflow \"{workflow_id}\" not found. It may have been deleted.'})}\n\n"
+        return
+    system_prompt = workflow.get("system_prompt") or ""
+    if not system_prompt:
+        yield f"event: error\ndata: {json.dumps({'message': f'Workflow \"{workflow_id}\" has no system prompt. Please edit it on the Workflows page.'})}\n\n"
+        return
+
     loop = asyncio.get_running_loop()
     job_dir = _ensure_job_dir(job_id)
 
@@ -412,9 +453,8 @@ async def _stream_processing(job_id: str, token: dict, retry_from: int = None) -
             yield f"event: page_ready\ndata: {json.dumps({'page': page_num, 'total_pages': total_pages})}\n\n"
 
             # Call vision AI in executor (blocking operation)
-            workflow_id = job.get("workflow_id", "edit")
             findings = await loop.run_in_executor(
-                None, partial(run_vision_check, img_bytes, selected_checkpoints, page_num, workflow_id)
+                None, partial(run_vision_check, img_bytes, selected_checkpoints, page_num, system_prompt)
             )
 
             # Assign finding IDs and add page reference
@@ -638,8 +678,9 @@ async def manage_checkpoints(request: Request):
     if not user:
         return RedirectResponse(url="/login")
 
-    workflow_id = request.query_params.get("workflow", WORKFLOWS[0]["id"])
-    selected_workflow = next((w for w in WORKFLOWS if w["id"] == workflow_id), WORKFLOWS[0])
+    default_wf_id = WORKFLOWS[0]["id"] if WORKFLOWS else ""
+    workflow_id = request.query_params.get("workflow", default_wf_id)
+    selected_workflow = next((w for w in WORKFLOWS if w["id"] == workflow_id), WORKFLOWS[0] if WORKFLOWS else None)
     filtered = _filter_checkpoints_by_workflow(CHECKPOINTS, selected_workflow["id"])
 
     return templates.TemplateResponse("checkpoints.html", _ctx(
@@ -785,3 +826,200 @@ async def delete_admin_route(request: Request, email: str):
         return RedirectResponse(url="/admins?success=Admin+removed.", status_code=303)
     except Exception as exc:
         return RedirectResponse(url=f"/admins?error={exc}", status_code=303)
+
+
+# ── Workflow management routes ─────────────────────────────────────────────────
+
+@app.get("/workflows", response_class=HTMLResponse)
+async def manage_workflows(request: Request):
+    user = auth.get_current_user(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    if not _is_admin(user):
+        return RedirectResponse(url="/?error=Admin+access+required.")
+
+    # Compute checkpoint count per workflow from the in-memory global
+    checkpoint_counts: dict[str, int] = {}
+    for cp in CHECKPOINTS:
+        for wf_id in cp.get("workflows", []):
+            checkpoint_counts[wf_id] = checkpoint_counts.get(wf_id, 0) + 1
+
+    return templates.TemplateResponse("workflows.html", _ctx(
+        request, user,
+        workflows=WORKFLOWS,
+        checkpoint_counts=checkpoint_counts,
+        success=request.query_params.get("success"),
+        error=request.query_params.get("error"),
+    ))
+
+
+@app.post("/workflows/add", response_class=HTMLResponse)
+async def add_workflow(
+    request: Request,
+    name: Annotated[str, Form()],
+    description: Annotated[str, Form()] = "",
+    action: Annotated[str, Form()] = "manual",
+):
+    """Create a new workflow, optionally generating checkpoints with AI."""
+    user = auth.get_current_user(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    if not _is_admin(user):
+        return RedirectResponse(url="/?error=Admin+access+required.", status_code=303)
+
+    name = name.strip()
+    description = description.strip()
+
+    if not name:
+        return RedirectResponse(url="/workflows?error=Workflow+name+is+required.", status_code=303)
+
+    wf_id = _slugify(name)
+    if not wf_id:
+        return RedirectResponse(url="/workflows?error=Could+not+generate+a+valid+ID+from+that+name.", status_code=303)
+
+    # Ensure ID is unique
+    if any(w["id"] == wf_id for w in WORKFLOWS):
+        return RedirectResponse(
+            url=f"/workflows?error=A+workflow+with+id+\"{wf_id}\"+already+exists.+Choose+a+different+name.",
+            status_code=303,
+        )
+
+    sort_order = max((w.get("sort_order", 0) for w in WORKFLOWS), default=0) + 1
+
+    if action == "generate":
+        if not description:
+            return RedirectResponse(
+                url="/workflows?error=A+description+is+required+for+AI+generation.",
+                status_code=303,
+            )
+        try:
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(
+                None, partial(generate_workflow_content, name, description)
+            )
+        except Exception as exc:
+            return RedirectResponse(url=f"/workflows?error={exc}", status_code=303)
+
+        # Insert workflow with generated system_prompt
+        try:
+            db.insert_workflow({
+                "id": wf_id,
+                "name": name,
+                "description": description,
+                "system_prompt": result["system_prompt"],
+                "sort_order": sort_order,
+                "created_by": user["email"],
+            })
+        except Exception as exc:
+            return RedirectResponse(url=f"/workflows?error={exc}", status_code=303)
+
+        # Batch-insert generated checkpoints
+        existing_nums = [
+            int(cp["id"].split("_")[1])
+            for cp in CHECKPOINTS
+            if cp["id"].startswith("cp_") and cp["id"].split("_")[1].isdigit()
+        ]
+        next_num = max(existing_nums, default=0) + 1
+        next_sort = max((cp.get("sort_order", 0) for cp in CHECKPOINTS), default=0) + 1
+
+        insert_errors = []
+        for cp_data in result.get("checkpoints", []):
+            try:
+                db.insert_checkpoint({
+                    "id": f"cp_{next_num:03d}",
+                    "category": cp_data["category"].strip(),
+                    "instructions": cp_data["instructions"].strip(),
+                    "type": cp_data["type"],
+                    "scope": cp_data["scope"],
+                    "workflows": [wf_id],
+                    "sort_order": next_sort,
+                })
+                next_num += 1
+                next_sort += 1
+            except Exception as exc:
+                insert_errors.append(str(exc))
+
+        _reload_checkpoints()
+        _reload_workflows()
+
+        cp_count = len(result.get("checkpoints", [])) - len(insert_errors)
+        msg = f"Workflow+created+with+{cp_count}+AI-generated+checkpoints."
+        if insert_errors:
+            msg += f"+({len(insert_errors)}+checkpoint+inserts+failed)"
+        return RedirectResponse(url=f"/workflows?success={msg}", status_code=303)
+
+    else:
+        # Manual creation — no system_prompt or checkpoints yet
+        try:
+            db.insert_workflow({
+                "id": wf_id,
+                "name": name,
+                "description": description,
+                "system_prompt": "",
+                "sort_order": sort_order,
+                "created_by": user["email"],
+            })
+            _reload_workflows()
+            return RedirectResponse(
+                url="/workflows?success=Workflow+created.+Add+a+system+prompt+and+checkpoints+to+activate+it.",
+                status_code=303,
+            )
+        except Exception as exc:
+            return RedirectResponse(url=f"/workflows?error={exc}", status_code=303)
+
+
+@app.post("/workflows/{wf_id}/edit", response_class=HTMLResponse)
+async def edit_workflow(
+    request: Request,
+    wf_id: str,
+    name: Annotated[str, Form()],
+    description: Annotated[str, Form()] = "",
+    system_prompt: Annotated[str, Form()] = "",
+):
+    user = auth.get_current_user(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    if not _is_admin(user):
+        return RedirectResponse(url="/?error=Admin+access+required.", status_code=303)
+
+    name = name.strip()
+    if not name:
+        return RedirectResponse(url="/workflows?error=Workflow+name+is+required.", status_code=303)
+
+    try:
+        db.update_workflow(wf_id, {
+            "name": name.strip(),
+            "description": description.strip(),
+            "system_prompt": system_prompt.strip(),
+        })
+        _reload_workflows()
+        return RedirectResponse(url="/workflows?success=Workflow+updated.", status_code=303)
+    except Exception as exc:
+        return RedirectResponse(url=f"/workflows?error={exc}", status_code=303)
+
+
+@app.post("/workflows/{wf_id}/delete", response_class=HTMLResponse)
+async def delete_workflow(request: Request, wf_id: str):
+    user = auth.get_current_user(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    if not _is_admin(user):
+        return RedirectResponse(url="/?error=Admin+access+required.", status_code=303)
+
+    # Only super admin or the admin who created this workflow may delete it
+    workflow = next((w for w in WORKFLOWS if w["id"] == wf_id), None)
+    if not workflow:
+        return RedirectResponse(url="/workflows?error=Workflow+not+found.", status_code=303)
+
+    if not _is_super_admin(user) and workflow.get("created_by") != user.get("email"):
+        return RedirectResponse(
+            url="/workflows?error=Only+the+super+admin+or+the+workflow+creator+can+delete+this+workflow.",
+            status_code=303,
+        )
+
+    try:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, partial(_cascade_delete_workflow, wf_id))
+        return RedirectResponse(url="/workflows?success=Workflow+and+its+exclusive+checkpoints+deleted.", status_code=303)
+    except Exception as exc:
+        return RedirectResponse(url=f"/workflows?error={exc}", status_code=303)
