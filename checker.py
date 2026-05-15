@@ -69,7 +69,7 @@ You are designing a document review workflow for CheckPoint, an AI tool that \
 checks educational textbook pages one at a time using vision AI.
 
 Workflow name: {name}
-Workflow description: {description}
+Checkpoint generation notes: {description}
 
 Generate a set of checkpoints for this workflow.
 
@@ -520,7 +520,7 @@ def run_vision_check(image_bytes: bytes, checkpoints: list[dict], page_num: int,
 
 # ── Workflow generation ───────────────────────────────────────────────────────
 
-def generate_workflow_content(name: str, description: str) -> dict:
+def generate_workflow_content(name: str, ai_notes: str) -> dict:
     """
     Generate checkpoints for a new workflow using Gemini structured output.
 
@@ -530,6 +530,11 @@ def generate_workflow_content(name: str, description: str) -> dict:
     Always uses GEMINI_API_KEY and the model from model_config.yaml,
     regardless of the active provider setting (structured output with
     response_schema is a Gemini-only feature).
+
+    Args:
+        name: workflow display name (e.g. "HSE")
+        ai_notes: admin's detailed notes on what categories and checks to
+                  generate — passed directly to Gemini as generation context
 
     Returns:
         {"checkpoints": [{"category", "instructions", "type", "scope"}, ...]}
@@ -558,6 +563,6 @@ def generate_workflow_content(name: str, description: str) -> dict:
         ),
     )
 
-    prompt = _GENERATION_PROMPT_TEMPLATE.format(name=name, description=description)
+    prompt = _GENERATION_PROMPT_TEMPLATE.format(name=name, description=ai_notes)
     response = model.generate_content(prompt)
     return json.loads(response.text)
