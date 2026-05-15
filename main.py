@@ -100,6 +100,40 @@ CHECKPOINT_MAP: dict[str, dict] = {}
 CATEGORIES: dict[str, list[dict]] = {}
 _reload_checkpoints()
 
+# ── Role-based access ─────────────────────────────────────────────────────────
+
+SUPER_ADMIN = "abhishek.jain@leadschool.in"
+ADMINS: set[str] = set()
+
+
+def _reload_admins() -> None:
+    global ADMINS
+    ADMINS = {a["email"] for a in db.fetch_all_admins()}
+
+
+_reload_admins()
+
+
+def _is_super_admin(user: dict | None) -> bool:
+    return bool(user) and user.get("email") == SUPER_ADMIN
+
+
+def _is_admin(user: dict | None) -> bool:
+    return bool(user) and (
+        user.get("email") == SUPER_ADMIN or user.get("email") in ADMINS
+    )
+
+
+def _ctx(request: Request, user: dict | None, **kwargs) -> dict:
+    """Base template context including role flags."""
+    return {
+        "request": request,
+        "user": user,
+        "is_admin": _is_admin(user),
+        "is_super_admin": _is_super_admin(user),
+        **kwargs,
+    }
+
 
 # ── Auth routes ───────────────────────────────────────────────────────────────
 
@@ -147,14 +181,13 @@ async def index(request: Request):
     # Find the selected workflow object
     selected_workflow = next((w for w in WORKFLOWS if w["id"] == workflow_id), None)
 
-    return templates.TemplateResponse("index.html", {
-        "request": request,
-        "user": user,
-        "workflows": WORKFLOWS,
-        "selected_workflow": selected_workflow,
-        "categories": filtered_categories,
-        "error": error,
-    })
+    return templates.TemplateResponse("index.html", _ctx(
+        request, user,
+        workflows=WORKFLOWS,
+        selected_workflow=selected_workflow,
+        categories=filtered_categories,
+        error=error,
+    ))
 
 
 @app.post("/check", response_class=HTMLResponse)
@@ -173,43 +206,39 @@ async def run_check(
 
     # Validate that a workflow was selected
     if not workflow_id or workflow_id not in [w["id"] for w in WORKFLOWS]:
-        filtered_categories = {}
-        return templates.TemplateResponse("index.html", {
-            "request": request,
-            "user": user,
-            "workflows": WORKFLOWS,
-            "selected_workflow": None,
-            "categories": filtered_categories,
-            "error": "Please select a workflow before running the check.",
-        })
+        return templates.TemplateResponse("index.html", _ctx(
+            request, user,
+            workflows=WORKFLOWS,
+            selected_workflow=None,
+            categories={},
+            error="Please select a workflow before running the check.",
+        ))
 
     # Validate that at least one checkpoint was selected
     if not checkpoint_ids:
         filtered_checkpoints = _filter_checkpoints_by_workflow(CHECKPOINTS, workflow_id)
         filtered_categories = _group_by_category(filtered_checkpoints)
         selected_workflow = next((w for w in WORKFLOWS if w["id"] == workflow_id), None)
-        return templates.TemplateResponse("index.html", {
-            "request": request,
-            "user": user,
-            "workflows": WORKFLOWS,
-            "selected_workflow": selected_workflow,
-            "categories": filtered_categories,
-            "error": "Please select at least one checkpoint before running the check.",
-        })
+        return templates.TemplateResponse("index.html", _ctx(
+            request, user,
+            workflows=WORKFLOWS,
+            selected_workflow=selected_workflow,
+            categories=filtered_categories,
+            error="Please select at least one checkpoint before running the check.",
+        ))
 
     # Validate that the URL field is not empty
     if not drive_url.strip():
         filtered_checkpoints = _filter_checkpoints_by_workflow(CHECKPOINTS, workflow_id)
         filtered_categories = _group_by_category(filtered_checkpoints)
         selected_workflow = next((w for w in WORKFLOWS if w["id"] == workflow_id), None)
-        return templates.TemplateResponse("index.html", {
-            "request": request,
-            "user": user,
-            "workflows": WORKFLOWS,
-            "selected_workflow": selected_workflow,
-            "categories": filtered_categories,
-            "error": "Please enter a Google Drive file URL.",
-        })
+        return templates.TemplateResponse("index.html", _ctx(
+            request, user,
+            workflows=WORKFLOWS,
+            selected_workflow=selected_workflow,
+            categories=filtered_categories,
+            error="Please enter a Google Drive file URL.",
+        ))
 
     selected_checkpoints = [
         CHECKPOINT_MAP[cid] for cid in checkpoint_ids if cid in CHECKPOINT_MAP
@@ -225,14 +254,13 @@ async def run_check(
         filtered_checkpoints = _filter_checkpoints_by_workflow(CHECKPOINTS, workflow_id)
         filtered_categories = _group_by_category(filtered_checkpoints)
         selected_workflow = next((w for w in WORKFLOWS if w["id"] == workflow_id), None)
-        return templates.TemplateResponse("index.html", {
-            "request": request,
-            "user": user,
-            "workflows": WORKFLOWS,
-            "selected_workflow": selected_workflow,
-            "categories": filtered_categories,
-            "error": str(exc),
-        })
+        return templates.TemplateResponse("index.html", _ctx(
+            request, user,
+            workflows=WORKFLOWS,
+            selected_workflow=selected_workflow,
+            categories=filtered_categories,
+            error=str(exc),
+        ))
     except Exception as exc:
         error_msg = str(exc)
         if "invalid_grant" in error_msg or "Token has been expired" in error_msg:
@@ -241,14 +269,13 @@ async def run_check(
         filtered_checkpoints = _filter_checkpoints_by_workflow(CHECKPOINTS, workflow_id)
         filtered_categories = _group_by_category(filtered_checkpoints)
         selected_workflow = next((w for w in WORKFLOWS if w["id"] == workflow_id), None)
-        return templates.TemplateResponse("index.html", {
-            "request": request,
-            "user": user,
-            "workflows": WORKFLOWS,
-            "selected_workflow": selected_workflow,
-            "categories": filtered_categories,
-            "error": f"Could not read the file: {error_msg}",
-        })
+        return templates.TemplateResponse("index.html", _ctx(
+            request, user,
+            workflows=WORKFLOWS,
+            selected_workflow=selected_workflow,
+            categories=filtered_categories,
+            error=f"Could not read the file: {error_msg}",
+        ))
 
     # Create a job and save metadata
     job_id = uuid.uuid4().hex
@@ -278,14 +305,13 @@ async def show_process(request: Request, job_id: str, retry_from: int = None):
 
     checkpoint_names = {cp["id"]: cp["category"] for cp in CHECKPOINTS}
 
-    return templates.TemplateResponse("process.html", {
-        "request": request,
-        "user": user,
-        "job_id": job_id,
-        "title": job["title"],
-        "retry_from": retry_from,
-        "checkpoint_names": checkpoint_names,
-    })
+    return templates.TemplateResponse("process.html", _ctx(
+        request, user,
+        job_id=job_id,
+        title=job["title"],
+        retry_from=retry_from,
+        checkpoint_names=checkpoint_names,
+    ))
 
 
 async def _stream_processing(job_id: str, token: dict, retry_from: int = None) -> None:
@@ -616,15 +642,14 @@ async def manage_checkpoints(request: Request):
     selected_workflow = next((w for w in WORKFLOWS if w["id"] == workflow_id), WORKFLOWS[0])
     filtered = _filter_checkpoints_by_workflow(CHECKPOINTS, selected_workflow["id"])
 
-    return templates.TemplateResponse("checkpoints.html", {
-        "request": request,
-        "user": user,
-        "workflows": WORKFLOWS,
-        "selected_workflow": selected_workflow,
-        "categories": _group_by_category(filtered),
-        "success": request.query_params.get("success"),
-        "error": request.query_params.get("error"),
-    })
+    return templates.TemplateResponse("checkpoints.html", _ctx(
+        request, user,
+        workflows=WORKFLOWS,
+        selected_workflow=selected_workflow,
+        categories=_group_by_category(filtered),
+        success=request.query_params.get("success"),
+        error=request.query_params.get("error"),
+    ))
 
 
 @app.post("/checkpoints/add", response_class=HTMLResponse)
@@ -639,6 +664,8 @@ async def add_checkpoint(
     user = auth.get_current_user(request)
     if not user:
         return RedirectResponse(url="/login", status_code=303)
+    if not _is_admin(user):
+        return RedirectResponse(url="/?error=Admin+access+required.", status_code=303)
 
     new_id = _next_checkpoint_id()
     sort_order = max((cp["sort_order"] for cp in CHECKPOINTS), default=0) + 1
@@ -673,6 +700,8 @@ async def edit_checkpoint(
     user = auth.get_current_user(request)
     if not user:
         return RedirectResponse(url="/login", status_code=303)
+    if not _is_admin(user):
+        return RedirectResponse(url="/?error=Admin+access+required.", status_code=303)
 
     workflow_param = request.query_params.get("workflow", workflows[0] if workflows else "")
     base = f"/checkpoints?workflow={workflow_param}"
@@ -694,6 +723,8 @@ async def delete_checkpoint(request: Request, cp_id: str):
     user = auth.get_current_user(request)
     if not user:
         return RedirectResponse(url="/login", status_code=303)
+    if not _is_admin(user):
+        return RedirectResponse(url="/?error=Admin+access+required.", status_code=303)
 
     workflow_param = request.query_params.get("workflow", "")
     base = f"/checkpoints?workflow={workflow_param}" if workflow_param else "/checkpoints"
@@ -703,3 +734,54 @@ async def delete_checkpoint(request: Request, cp_id: str):
         return RedirectResponse(url=f"{base}&success=Checkpoint+deleted.", status_code=303)
     except Exception as exc:
         return RedirectResponse(url=f"{base}&error={exc}", status_code=303)
+
+
+# ── Admin management routes ────────────────────────────────────────────────────
+
+@app.get("/admins", response_class=HTMLResponse)
+async def manage_admins(request: Request):
+    user = auth.get_current_user(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    if not _is_admin(user):
+        return RedirectResponse(url="/?error=Admin+access+required.")
+
+    admins = db.fetch_all_admins()
+    return templates.TemplateResponse("admins.html", _ctx(
+        request, user,
+        admins=admins,
+        super_admin=SUPER_ADMIN,
+        success=request.query_params.get("success"),
+        error=request.query_params.get("error"),
+    ))
+
+
+@app.post("/admins/add", response_class=HTMLResponse)
+async def add_admin(
+    request: Request,
+    email: Annotated[str, Form()],
+):
+    user = auth.get_current_user(request)
+    if not user or not _is_admin(user):
+        return RedirectResponse(url="/login", status_code=303)
+
+    try:
+        db.insert_admin({"email": email.strip().lower(), "added_by": user["email"]})
+        _reload_admins()
+        return RedirectResponse(url="/admins?success=Admin+added.", status_code=303)
+    except Exception as exc:
+        return RedirectResponse(url=f"/admins?error={exc}", status_code=303)
+
+
+@app.post("/admins/{email}/delete", response_class=HTMLResponse)
+async def delete_admin_route(request: Request, email: str):
+    user = auth.get_current_user(request)
+    if not user or not _is_super_admin(user):
+        return RedirectResponse(url="/login", status_code=303)
+
+    try:
+        db.delete_admin(email)
+        _reload_admins()
+        return RedirectResponse(url="/admins?success=Admin+removed.", status_code=303)
+    except Exception as exc:
+        return RedirectResponse(url=f"/admins?error={exc}", status_code=303)

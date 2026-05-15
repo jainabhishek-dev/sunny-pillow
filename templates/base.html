@@ -29,6 +29,9 @@
     {% if user %}
     <div class="flex items-center gap-4">
       <a href="/checkpoints" class="text-sm text-gray-500 hover:text-indigo-600 font-medium transition">Checkpoints</a>
+      {% if is_admin %}
+      <a href="/admins" class="text-sm text-gray-500 hover:text-indigo-600 font-medium transition">Admins</a>
+      {% endif %}
       <div class="flex items-center gap-2">
         {% if user.picture %}
         <img src="{{ user.picture }}" alt="avatar" class="w-8 h-8 rounded-full" referrerpolicy="no-referrer" />
