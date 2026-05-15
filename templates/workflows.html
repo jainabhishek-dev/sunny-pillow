@@ -88,10 +88,6 @@
         <div class="flex items-center gap-3 flex-wrap">
           <span class="text-sm font-semibold text-gray-800">{{ workflow.name }}</span>
           <span class="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 font-mono">{{ workflow.id }}</span>
-          <span class="text-xs px-2 py-0.5 rounded-full
-            {% if workflow.system_prompt %}bg-green-50 text-green-600{% else %}bg-amber-50 text-amber-600{% endif %}">
-            {% if workflow.system_prompt %}prompt set{% else %}no prompt{% endif %}
-          </span>
           <span class="text-xs text-gray-400">
             {{ checkpoint_counts.get(workflow.id, 0) }} checkpoint{{ 's' if checkpoint_counts.get(workflow.id, 0) != 1 else '' }}
           </span>
@@ -135,15 +131,6 @@
             <input type="text" name="description" value="{{ workflow.description or '' }}"
               class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
           </div>
-        </div>
-
-        <div>
-          <label class="block text-xs font-semibold text-gray-600 mb-1">
-            System Prompt
-            <span class="font-normal text-gray-400 ml-1">— must contain <code class="bg-gray-100 px-1 rounded">{rules}</code> and <code class="bg-gray-100 px-1 rounded">{page_num}</code></span>
-          </label>
-          <textarea name="system_prompt" rows="10"
-            class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400">{{ workflow.system_prompt or '' }}</textarea>
         </div>
 
         <div class="flex justify-end gap-3">

@@ -360,18 +360,14 @@ async def _stream_processing(job_id: str, token: dict, retry_from: int = None) -
         yield f"event: error\ndata: {json.dumps({'message': 'Job not found'})}\n\n"
         return
 
-    # Resolve system_prompt from the current WORKFLOWS global.
-    # This must be done before any PDF work so we fail fast if the workflow
-    # has been deleted or its prompt has not yet been configured.
+    # Resolve workflow name from the current WORKFLOWS global.
+    # Fail fast if the workflow has been deleted between job creation and processing.
     workflow_id = job.get("workflow_id", "")
     workflow = next((w for w in WORKFLOWS if w["id"] == workflow_id), None)
     if not workflow:
         yield f"event: error\ndata: {json.dumps({'message': f'Workflow \"{workflow_id}\" not found. It may have been deleted.'})}\n\n"
         return
-    system_prompt = workflow.get("system_prompt") or ""
-    if not system_prompt:
-        yield f"event: error\ndata: {json.dumps({'message': f'Workflow \"{workflow_id}\" has no system prompt. Please edit it on the Workflows page.'})}\n\n"
-        return
+    workflow_name = workflow["name"]
 
     loop = asyncio.get_running_loop()
     job_dir = _ensure_job_dir(job_id)
@@ -454,7 +450,7 @@ async def _stream_processing(job_id: str, token: dict, retry_from: int = None) -
 
             # Call vision AI in executor (blocking operation)
             findings = await loop.run_in_executor(
-                None, partial(run_vision_check, img_bytes, selected_checkpoints, page_num, system_prompt)
+                None, partial(run_vision_check, img_bytes, selected_checkpoints, page_num, workflow_name)
             )
 
             # Assign finding IDs and add page reference
@@ -899,13 +895,12 @@ async def add_workflow(
         except Exception as exc:
             return RedirectResponse(url=f"/workflows?error={exc}", status_code=303)
 
-        # Insert workflow with generated system_prompt
+        # Insert workflow row
         try:
             db.insert_workflow({
                 "id": wf_id,
                 "name": name,
                 "description": description,
-                "system_prompt": result["system_prompt"],
                 "sort_order": sort_order,
                 "created_by": user["email"],
             })
@@ -948,13 +943,12 @@ async def add_workflow(
         return RedirectResponse(url=f"/workflows?success={msg}", status_code=303)
 
     else:
-        # Manual creation — no system_prompt or checkpoints yet
+        # Manual creation — no checkpoints yet; admin adds them via /checkpoints
         try:
             db.insert_workflow({
                 "id": wf_id,
                 "name": name,
                 "description": description,
-                "system_prompt": "",
                 "sort_order": sort_order,
                 "created_by": user["email"],
             })
@@ -973,7 +967,6 @@ async def edit_workflow(
     wf_id: str,
     name: Annotated[str, Form()],
     description: Annotated[str, Form()] = "",
-    system_prompt: Annotated[str, Form()] = "",
 ):
     user = auth.get_current_user(request)
     if not user:
@@ -987,9 +980,8 @@ async def edit_workflow(
 
     try:
         db.update_workflow(wf_id, {
-            "name": name.strip(),
+            "name": name,
             "description": description.strip(),
-            "system_prompt": system_prompt.strip(),
         })
         _reload_workflows()
         return RedirectResponse(url="/workflows?success=Workflow+updated.", status_code=303)

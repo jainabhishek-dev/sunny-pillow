@@ -15,12 +15,38 @@ def _load_model_config() -> dict:
 
 
 
+# ── Vision prompt template (fully hardcoded) ─────────────────────────────────
+#
+# {workflow_name}, {rules}, and {page_num} are replaced at runtime via
+# str.replace() — no .format() to avoid brace-escaping issues.
+
+_VISION_PROMPT_TEMPLATE = (
+    'You are a professional content reviewer for LEAD, an educational publishing house'
+    ' specialising in "{workflow_name}".\n\n'
+    "Review the document page image against ONLY these checkpoints:\n\n"
+    "{rules}\n\n"
+    "INSTRUCTIONS:\n"
+    "- Read the page image carefully.\n"
+    "- For each checkpoint, flag EVERY issue you can see.\n"
+    "- Use the checkpoint_id shown in brackets for each checkpoint.\n"
+    "- Quote exact text from the page (20–80 characters). "
+    "For visual issues (images, layout), quote the nearest caption or label instead.\n"
+    "- Keep issue and suggestion fields to 15 words or fewer each.\n"
+    "- Return a JSON array only. No markdown, no explanation.\n\n"
+    'Schema:\n'
+    '[{"checkpoint_id": "cp_001", "quote": "...", "location": "Page {page_num}",'
+    ' "issue": "...", "suggestion": "..."}]\n\n'
+    "Return [] if no violations found on this page."
+)
+
 # ── Structured-output schema for workflow generation ──────────────────────────
+#
+# Only checkpoints are generated — the reviewer persona is constructed from
+# the workflow name at runtime, so there is nothing for the AI to generate there.
 
 _WORKFLOW_GENERATION_SCHEMA = {
     "type": "object",
     "properties": {
-        "system_prompt": {"type": "string"},
         "checkpoints": {
             "type": "array",
             "items": {
@@ -35,12 +61,9 @@ _WORKFLOW_GENERATION_SCHEMA = {
             },
         },
     },
-    "required": ["system_prompt", "checkpoints"],
+    "required": ["checkpoints"],
 }
 
-# Uses .format(name=..., description=...) at call time.
-# {{rules}} and {{page_num}} become literal {rules} and {page_num} in the
-# formatted string — they are placeholders the generated system_prompt must contain.
 _GENERATION_PROMPT_TEMPLATE = """\
 You are designing a document review workflow for CheckPoint, an AI tool that \
 checks educational textbook pages one at a time using vision AI.
@@ -48,14 +71,7 @@ checks educational textbook pages one at a time using vision AI.
 Workflow name: {name}
 Workflow description: {description}
 
-Generate a system_prompt and a set of checkpoints for this workflow.
-
-system_prompt must:
-- Open with a reviewer persona matching the domain
-- Contain exactly these two placeholders (injected at runtime): {{rules}} and {{page_num}}
-- Close with: 'Return a JSON array of findings. Each finding: \
-{{"quote": "exact text from page", "issue": "what is wrong", "suggestion": "how to fix"}}. \
-Return [] if no issues found.'
+Generate a set of checkpoints for this workflow.
 
 Checkpoints must be specific enough for an AI to apply visually to a single page image.
 Good: "Check that all exercise numbers are sequential and flag any gaps or repeats"
@@ -63,13 +79,18 @@ Bad: "Check for errors" or "Review the content"\
 """
 
 
-def _build_vision_prompt(checkpoints: list[dict], page_num: int, system_prompt: str) -> str:
-    """Inject checkpoint rules and page number into the workflow's system prompt."""
+def _build_vision_prompt(checkpoints: list[dict], page_num: int, workflow_name: str) -> str:
+    """Build the full vision prompt from the hardcoded template and runtime values."""
     rules = "\n".join(
         f"{i + 1}. [{cp['id']}] {cp['instructions'].strip()}"
         for i, cp in enumerate(checkpoints)
     )
-    return system_prompt.replace("{rules}", rules).replace("{page_num}", str(page_num))
+    return (
+        _VISION_PROMPT_TEMPLATE
+        .replace("{workflow_name}", workflow_name)
+        .replace("{rules}", rules)
+        .replace("{page_num}", str(page_num))
+    )
 
 
 def _extract_complete_objects(text: str) -> list[dict]:
@@ -140,7 +161,7 @@ def _parse_response(raw: str) -> list[dict]:
     return _extract_complete_objects(raw)
 
 
-def _run_gemini_vision(image_bytes: bytes, checkpoints: list[dict], page_num: int, config: dict, system_prompt: str) -> list[dict]:
+def _run_gemini_vision(image_bytes: bytes, checkpoints: list[dict], page_num: int, config: dict, workflow_name: str) -> list[dict]:
     """Call Gemini with vision capabilities."""
     import google.generativeai as genai
 
@@ -162,13 +183,13 @@ def _run_gemini_vision(image_bytes: bytes, checkpoints: list[dict], page_num: in
     # Convert bytes to PIL Image
     image = Image.open(BytesIO(image_bytes))
 
-    prompt = _build_vision_prompt(checkpoints, page_num, system_prompt)
+    prompt = _build_vision_prompt(checkpoints, page_num, workflow_name)
     response = model.generate_content([prompt, image])
     findings = _parse_response(response.text)
     return findings
 
 
-def _run_anthropic_vision(image_bytes: bytes, checkpoints: list[dict], page_num: int, config: dict, system_prompt: str) -> list[dict]:
+def _run_anthropic_vision(image_bytes: bytes, checkpoints: list[dict], page_num: int, config: dict, workflow_name: str) -> list[dict]:
     """Call Anthropic Claude with vision capabilities."""
     import anthropic
     import base64
@@ -184,7 +205,7 @@ def _run_anthropic_vision(image_bytes: bytes, checkpoints: list[dict], page_num:
     # Encode image as base64
     image_data = base64.standard_b64encode(image_bytes).decode("utf-8")
 
-    prompt = _build_vision_prompt(checkpoints, page_num, system_prompt)
+    prompt = _build_vision_prompt(checkpoints, page_num, workflow_name)
     message = client.messages.create(
         model=config["model"],
         max_tokens=config["max_tokens"],
@@ -460,7 +481,7 @@ def run_document_review(pdf_bytes: bytes, findings: list[dict]) -> list[dict]:
     return [r for r in reviews if isinstance(r, dict) and required_keys.issubset(r.keys())]
 
 
-def run_vision_check(image_bytes: bytes, checkpoints: list[dict], page_num: int, system_prompt: str) -> list[dict]:
+def run_vision_check(image_bytes: bytes, checkpoints: list[dict], page_num: int, workflow_name: str) -> list[dict]:
     """
     Runs vision-based checking on a single page image.
 
@@ -468,8 +489,8 @@ def run_vision_check(image_bytes: bytes, checkpoints: list[dict], page_num: int,
         image_bytes: JPEG image bytes
         checkpoints: list of checkpoint dicts with 'id', 'instructions', etc.
         page_num: page number (for location field in findings)
-        system_prompt: the workflow's system prompt (fetched from Supabase),
-                       must contain {rules} and {page_num} placeholders
+        workflow_name: display name of the workflow (e.g. "HSE"), used to
+                       construct the reviewer persona in the prompt
 
     Returns:
         list of finding dicts, each with:
@@ -479,9 +500,9 @@ def run_vision_check(image_bytes: bytes, checkpoints: list[dict], page_num: int,
     provider = config.get("provider", "gemini")
 
     if provider == "gemini":
-        findings = _run_gemini_vision(image_bytes, checkpoints, page_num, config, system_prompt)
+        findings = _run_gemini_vision(image_bytes, checkpoints, page_num, config, workflow_name)
     elif provider == "anthropic":
-        findings = _run_anthropic_vision(image_bytes, checkpoints, page_num, config, system_prompt)
+        findings = _run_anthropic_vision(image_bytes, checkpoints, page_num, config, workflow_name)
     else:
         raise ValueError(
             f"Unsupported provider '{provider}' in config/model_config.yaml. "
@@ -501,22 +522,20 @@ def run_vision_check(image_bytes: bytes, checkpoints: list[dict], page_num: int,
 
 def generate_workflow_content(name: str, description: str) -> dict:
     """
-    Generate a system_prompt and checkpoints for a new workflow using Gemini
-    structured output.
+    Generate checkpoints for a new workflow using Gemini structured output.
+
+    The reviewer persona is constructed from the workflow name at runtime, so
+    only checkpoints are generated here.
 
     Always uses GEMINI_API_KEY and the model from model_config.yaml,
     regardless of the active provider setting (structured output with
     response_schema is a Gemini-only feature).
 
     Returns:
-        {
-            "system_prompt": str,
-            "checkpoints": [{"category", "instructions", "type", "scope"}, ...]
-        }
+        {"checkpoints": [{"category", "instructions", "type", "scope"}, ...]}
 
     Raises:
-        RuntimeError: if the API key is missing or the generated system_prompt
-                      does not contain the required {rules} / {page_num} placeholders.
+        RuntimeError: if GEMINI_API_KEY is not set.
     """
     import google.generativeai as genai
 
@@ -541,15 +560,4 @@ def generate_workflow_content(name: str, description: str) -> dict:
 
     prompt = _GENERATION_PROMPT_TEMPLATE.format(name=name, description=description)
     response = model.generate_content(prompt)
-    data = json.loads(response.text)
-
-    # Validate required placeholders are present in the generated system_prompt
-    system_prompt = data.get("system_prompt", "")
-    missing = [p for p in ("{rules}", "{page_num}") if p not in system_prompt]
-    if missing:
-        raise RuntimeError(
-            f"Generated system_prompt is missing required placeholders: "
-            f"{', '.join(missing)}. Please try generating again."
-        )
-
-    return data
+    return json.loads(response.text)
