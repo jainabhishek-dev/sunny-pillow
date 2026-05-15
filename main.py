@@ -108,6 +108,11 @@ CATEGORIES: dict[str, list[dict]] = {}
 _reload_workflows()
 _reload_checkpoints()
 
+# Jobs currently being streamed. Prevents multiple concurrent stream connections
+# for the same job (e.g. from EventSource auto-reconnects) from each loading and
+# processing the full PDF simultaneously, which causes OOM crashes.
+_ACTIVE_JOBS: set[str] = set()
+
 # ── Role-based access ─────────────────────────────────────────────────────────
 
 SUPER_ADMIN = "abhishek.jain@leadschool.in"
@@ -360,196 +365,182 @@ async def _stream_processing(job_id: str, token: dict, retry_from: int = None) -
         yield f"event: error\ndata: {json.dumps({'message': 'Job not found'})}\n\n"
         return
 
-    # Resolve workflow name from the current WORKFLOWS global.
-    # Fail fast if the workflow has been deleted between job creation and processing.
-    workflow_id = job.get("workflow_id", "")
-    workflow = next((w for w in WORKFLOWS if w["id"] == workflow_id), None)
-    if not workflow:
-        yield f"event: error\ndata: {json.dumps({'message': f'Workflow \"{workflow_id}\" not found. It may have been deleted.'})}\n\n"
-        return
-    workflow_name = workflow["name"]
-
-    loop = asyncio.get_running_loop()
-    job_dir = _ensure_job_dir(job_id)
-
-    # If not retrying, get PDF; if retrying, use existing job state
-    if retry_from is None:
-        # Get the PDF bytes using file_id from the job
-        try:
-            pdf_data = await loop.run_in_executor(
-                None, partial(get_pdf_bytes_by_id, token, job["file_id"])
-            )
-            pdf_bytes = pdf_data.get("pdf_bytes")
-            if not pdf_bytes:
-                raise ValueError("No PDF bytes retrieved")
-        except Exception as e:
-            yield f"event: error\ndata: {json.dumps({'message': f'Could not export file as PDF: {str(e)}'})}\n\n"
+    # Acquire job lock — released in the finally block below regardless of how
+    # this generator exits (normal completion, exception, or client disconnect).
+    _ACTIVE_JOBS.add(job_id)
+    try:
+        # Resolve workflow name — fail fast if deleted between job creation and now.
+        workflow_id = job.get("workflow_id", "")
+        workflow = next((w for w in WORKFLOWS if w["id"] == workflow_id), None)
+        if not workflow:
+            yield f"event: error\ndata: {json.dumps({'message': f'Workflow \"{workflow_id}\" not found. It may have been deleted.'})}\n\n"
             return
+        workflow_name = workflow["name"]
 
-        # Open PDF with PyMuPDF
-        try:
-            pdf_document = fitz.open(stream=BytesIO(pdf_bytes), filetype="pdf")
-        except Exception as e:
-            yield f"event: error\ndata: {json.dumps({'message': f'Could not parse PDF: {str(e)}'})}\n\n"
-            return
+        loop = asyncio.get_running_loop()
+        job_dir = _ensure_job_dir(job_id)
 
-        total_pages = len(pdf_document)
-        all_findings = []
-        finding_id_counter = 0
-        start_page = 1
+        # ── Load PDF ──────────────────────────────────────────────────────────
+        if retry_from is None:
+            try:
+                pdf_data = await loop.run_in_executor(
+                    None, partial(get_pdf_bytes_by_id, token, job["file_id"])
+                )
+                pdf_bytes = pdf_data.get("pdf_bytes")
+                if not pdf_bytes:
+                    raise ValueError("No PDF bytes retrieved")
+            except Exception as e:
+                yield f"event: error\ndata: {json.dumps({'message': f'Could not export file as PDF: {str(e)}'})}\n\n"
+                return
 
-        # Send start event
-        yield f"event: start\ndata: {json.dumps({'total_pages': total_pages, 'title': job['title']})}\n\n"
-    else:
-        # Retry mode: load existing PDF and findings
-        try:
-            pdf_data = await loop.run_in_executor(
-                None, partial(get_pdf_bytes_by_id, token, job["file_id"])
-            )
-            pdf_bytes = pdf_data.get("pdf_bytes")
-            pdf_document = fitz.open(stream=BytesIO(pdf_bytes), filetype="pdf")
-        except Exception as e:
-            yield f"event: error\ndata: {json.dumps({'message': f'Could not re-open PDF: {str(e)}'})}\n\n"
-            return
+            try:
+                pdf_document = fitz.open(stream=BytesIO(pdf_bytes), filetype="pdf")
+            except Exception as e:
+                yield f"event: error\ndata: {json.dumps({'message': f'Could not parse PDF: {str(e)}'})}\n\n"
+                return
 
-        total_pages = len(pdf_document)
-        start_page = retry_from
-
-        # Load existing findings
-        findings_file = job_dir / "findings.json"
-        if findings_file.exists():
-            all_findings = json.loads(findings_file.read_text(encoding="utf-8"))
-            finding_id_counter = max([f.get("id", 0) for f in all_findings] + [0]) + 1
-        else:
+            total_pages = len(pdf_document)
             all_findings = []
             finding_id_counter = 0
+            start_page = 1
 
-        # Send retry_start event
-        yield f"event: retry_start\ndata: {json.dumps({'starting_page': start_page, 'total_pages': total_pages})}\n\n"
-
-    # Get selected checkpoints
-    selected_checkpoints = [
-        CHECKPOINT_MAP[cid] for cid in job["checkpoint_ids"] if cid in CHECKPOINT_MAP
-    ]
-
-    # Process each page
-    for page_num in range(start_page, total_pages + 1):
-        try:
-            # Render page to image (2× zoom for readability)
-            page = pdf_document[page_num - 1]
-            mat = fitz.Matrix(2, 2)  # 2× zoom
-            pix = page.get_pixmap(matrix=mat, alpha=False)
-            img_bytes = pix.tobytes(output="jpeg")
-
-            # Save image to disk
-            img_path = job_dir / f"page_{page_num:03d}.jpg"
-            img_path.write_bytes(img_bytes)
-
-            # Send page_ready event
-            yield f"event: page_ready\ndata: {json.dumps({'page': page_num, 'total_pages': total_pages})}\n\n"
-
-            # Call vision AI in executor (blocking operation)
-            findings = await loop.run_in_executor(
-                None, partial(run_vision_check, img_bytes, selected_checkpoints, page_num, workflow_name)
-            )
-
-            # Assign finding IDs and add page reference
-            for finding in findings:
-                finding["id"] = finding_id_counter
-                if "location" not in finding or finding["location"] == "":
-                    finding["location"] = f"Page {page_num}"
-                all_findings.append(finding)
-                finding_id_counter += 1
-
-            # Send page_findings event
-            yield f"event: page_findings\ndata: {json.dumps({'page': page_num, 'findings': findings})}\n\n"
-
-            # Second-pass review (skipped if no findings on this page)
-            if findings:
-                reviews = await loop.run_in_executor(
-                    None, partial(run_vision_review, img_bytes, findings, page_num)
-                )
-                yield f"event: page_review\ndata: {json.dumps({'page': page_num, 'reviews': reviews})}\n\n"
-
-        except Exception as e:
-            # On error: save state, send partial_complete event, and stop processing
-            job["last_successful_page"] = page_num - 1
-            _save_job(job_id, job)
-
-            # Save findings accumulated so far
+            yield f"event: start\ndata: {json.dumps({'total_pages': total_pages, 'title': job['title']})}\n\n"
+        else:
             try:
-                (job_dir / "findings.json").write_text(
-                    json.dumps(all_findings, ensure_ascii=False),
-                    encoding="utf-8"
+                pdf_data = await loop.run_in_executor(
+                    None, partial(get_pdf_bytes_by_id, token, job["file_id"])
                 )
-            except Exception as save_error:
-                yield f"event: error\ndata: {json.dumps({'message': f'Could not save findings: {str(save_error)}'})}\n\n"
+                pdf_bytes = pdf_data.get("pdf_bytes")
+                pdf_document = fitz.open(stream=BytesIO(pdf_bytes), filetype="pdf")
+            except Exception as e:
+                yield f"event: error\ndata: {json.dumps({'message': f'Could not re-open PDF: {str(e)}'})}\n\n"
+                return
 
-            # Send partial_complete event with retry info
-            yield f"event: partial_complete\ndata: {json.dumps({
-                'last_successful_page': page_num - 1,
-                'total_pages': total_pages,
-                'error_message': str(e)
-            })}\n\n"
+            total_pages = len(pdf_document)
+            start_page = retry_from
 
-            # Stop processing
-            return
+            findings_file = job_dir / "findings.json"
+            if findings_file.exists():
+                all_findings = json.loads(findings_file.read_text(encoding="utf-8"))
+                finding_id_counter = max([f.get("id", 0) for f in all_findings] + [0]) + 1
+            else:
+                all_findings = []
+                finding_id_counter = 0
 
-    # Save page findings to findings.json
-    try:
-        (job_dir / "findings.json").write_text(
-            json.dumps(all_findings, ensure_ascii=False),
-            encoding="utf-8"
-        )
-    except Exception as e:
-        yield f"event: error\ndata: {json.dumps({'message': f'Could not save findings: {str(e)}'})}\n\n"
+            yield f"event: retry_start\ndata: {json.dumps({'starting_page': start_page, 'total_pages': total_pages})}\n\n"
 
-    # Send done event (pages complete — stream stays open for document-level)
-    yield f"event: done\ndata: {json.dumps({'total_findings': len(all_findings)})}\n\n"
+        selected_checkpoints = [
+            CHECKPOINT_MAP[cid] for cid in job["checkpoint_ids"] if cid in CHECKPOINT_MAP
+        ]
 
-    # ── Document-level check ──────────────────────────────────────────────────
-    doc_checkpoints = [cp for cp in selected_checkpoints if cp.get("scope") == "document"]
+        # ── Page-by-page processing ───────────────────────────────────────────
+        for page_num in range(start_page, total_pages + 1):
+            try:
+                page = pdf_document[page_num - 1]
+                mat = fitz.Matrix(2, 2)  # 2× zoom
+                pix = page.get_pixmap(matrix=mat, alpha=False)
+                img_bytes = pix.tobytes(output="jpeg")
 
-    if doc_checkpoints:
-        yield f"event: document_start\ndata: {json.dumps({})}\n\n"
+                img_path = job_dir / f"page_{page_num:03d}.jpg"
+                img_path.write_bytes(img_bytes)
 
+                yield f"event: page_ready\ndata: {json.dumps({'page': page_num, 'total_pages': total_pages})}\n\n"
+
+                findings = await loop.run_in_executor(
+                    None, partial(run_vision_check, img_bytes, selected_checkpoints, page_num, workflow_name)
+                )
+
+                for finding in findings:
+                    finding["id"] = finding_id_counter
+                    if "location" not in finding or finding["location"] == "":
+                        finding["location"] = f"Page {page_num}"
+                    all_findings.append(finding)
+                    finding_id_counter += 1
+
+                yield f"event: page_findings\ndata: {json.dumps({'page': page_num, 'findings': findings})}\n\n"
+
+                if findings:
+                    reviews = await loop.run_in_executor(
+                        None, partial(run_vision_review, img_bytes, findings, page_num)
+                    )
+                    yield f"event: page_review\ndata: {json.dumps({'page': page_num, 'reviews': reviews})}\n\n"
+
+                # Explicitly free the page image — it is no longer needed and
+                # can be several MB; do not wait for GC.
+                del img_bytes
+
+            except Exception as e:
+                job["last_successful_page"] = page_num - 1
+                _save_job(job_id, job)
+                try:
+                    (job_dir / "findings.json").write_text(
+                        json.dumps(all_findings, ensure_ascii=False), encoding="utf-8"
+                    )
+                except Exception as save_error:
+                    yield f"event: error\ndata: {json.dumps({'message': f'Could not save findings: {str(save_error)}'})}\n\n"
+
+                yield f"event: partial_complete\ndata: {json.dumps({'last_successful_page': page_num - 1, 'total_pages': total_pages, 'error_message': str(e)})}\n\n"
+                return
+
+        # Free fitz document after page loop — pdf_bytes is still needed for
+        # the document-level check but the decoded document object is not.
+        pdf_document.close()
+        del pdf_document
+
+        # ── Save page findings ────────────────────────────────────────────────
         try:
-            doc_findings = await loop.run_in_executor(
-                None, partial(run_document_check, pdf_bytes, doc_checkpoints)
-            )
-
-            # Assign IDs continuing from page findings
-            for finding in doc_findings:
-                finding["id"] = finding_id_counter
-                finding.setdefault("location", "Document")
-                all_findings.append(finding)
-                finding_id_counter += 1
-
-            yield f"event: document_findings\ndata: {json.dumps({'findings': doc_findings})}\n\n"
-
-            # Document review pass
-            if doc_findings:
-                doc_reviews = await loop.run_in_executor(
-                    None, partial(run_document_review, pdf_bytes, doc_findings)
-                )
-                yield f"event: document_review\ndata: {json.dumps({'reviews': doc_reviews})}\n\n"
-
-            # Persist updated findings
             (job_dir / "findings.json").write_text(
-                json.dumps(all_findings, ensure_ascii=False),
-                encoding="utf-8"
+                json.dumps(all_findings, ensure_ascii=False), encoding="utf-8"
             )
-
         except Exception as e:
-            yield f"event: error\ndata: {json.dumps({'message': f'Document-level check failed: {str(e)}'})}\n\n"
+            yield f"event: error\ndata: {json.dumps({'message': f'Could not save findings: {str(e)}'})}\n\n"
 
-    # Send all_done to close the stream
-    yield f"event: all_done\ndata: {json.dumps({'total_findings': len(all_findings)})}\n\n"
+        yield f"event: done\ndata: {json.dumps({'total_findings': len(all_findings)})}\n\n"
 
-    # Update job status
-    job["status"] = "completed"
-    job.pop("last_successful_page", None)
-    _save_job(job_id, job)
+        # ── Document-level check ──────────────────────────────────────────────
+        doc_checkpoints = [cp for cp in selected_checkpoints if cp.get("scope") == "document"]
+
+        if doc_checkpoints:
+            yield f"event: document_start\ndata: {json.dumps({})}\n\n"
+
+            try:
+                doc_findings = await loop.run_in_executor(
+                    None, partial(run_document_check, pdf_bytes, doc_checkpoints)
+                )
+
+                for finding in doc_findings:
+                    finding["id"] = finding_id_counter
+                    finding.setdefault("location", "Document")
+                    all_findings.append(finding)
+                    finding_id_counter += 1
+
+                yield f"event: document_findings\ndata: {json.dumps({'findings': doc_findings})}\n\n"
+
+                if doc_findings:
+                    doc_reviews = await loop.run_in_executor(
+                        None, partial(run_document_review, pdf_bytes, doc_findings)
+                    )
+                    yield f"event: document_review\ndata: {json.dumps({'reviews': doc_reviews})}\n\n"
+
+                (job_dir / "findings.json").write_text(
+                    json.dumps(all_findings, ensure_ascii=False), encoding="utf-8"
+                )
+
+            except Exception as e:
+                yield f"event: error\ndata: {json.dumps({'message': f'Document-level check failed: {str(e)}'})}\n\n"
+
+        # Free PDF bytes — document-level check is complete.
+        del pdf_bytes
+
+        yield f"event: all_done\ndata: {json.dumps({'total_findings': len(all_findings)})}\n\n"
+
+        job["status"] = "completed"
+        job.pop("last_successful_page", None)
+        _save_job(job_id, job)
+
+    finally:
+        # Always release the job lock so future stream requests are accepted.
+        _ACTIVE_JOBS.discard(job_id)
 
 
 @app.get("/stream/{job_id}")
@@ -560,6 +551,21 @@ async def stream_processing(request: Request, job_id: str, retry_from: int = Non
 
     if not user or not token:
         return RedirectResponse(url="/login")
+
+    # Reject duplicate connections for the same job. EventSource auto-reconnects
+    # on any network hiccup; without this guard each reconnect would load and
+    # process the full PDF again in parallel, causing OOM crashes.
+    if job_id in _ACTIVE_JOBS:
+        async def _already_processing():
+            yield (
+                f"event: error\ndata: {json.dumps({'message': 'This job is already being processed. '
+                'Please wait for the current run to complete.'})}\n\n"
+            )
+        return StreamingResponse(
+            _already_processing(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     return StreamingResponse(
         _stream_processing(job_id, token, retry_from),
