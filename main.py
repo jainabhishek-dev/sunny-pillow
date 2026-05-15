@@ -791,7 +791,6 @@ async def manage_admins(request: Request):
     return templates.TemplateResponse("admins.html", _ctx(
         request, user,
         admins=admins,
-        super_admin=SUPER_ADMIN,
         success=request.query_params.get("success"),
         error=request.query_params.get("error"),
     ))
