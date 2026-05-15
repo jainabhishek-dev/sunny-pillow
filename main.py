@@ -853,6 +853,7 @@ async def add_workflow(
     request: Request,
     name: Annotated[str, Form()],
     description: Annotated[str, Form()] = "",
+    ai_notes: Annotated[str, Form()] = "",
     action: Annotated[str, Form()] = "manual",
 ):
     """Create a new workflow, optionally generating checkpoints with AI."""
@@ -882,15 +883,15 @@ async def add_workflow(
     sort_order = max((w.get("sort_order", 0) for w in WORKFLOWS), default=0) + 1
 
     if action == "generate":
-        if not description:
+        if not ai_notes.strip():
             return RedirectResponse(
-                url="/workflows?error=A+description+is+required+for+AI+generation.",
+                url="/workflows?error=AI+Generation+Notes+are+required+when+using+Create+with+AI.",
                 status_code=303,
             )
         try:
             loop = asyncio.get_running_loop()
             result = await loop.run_in_executor(
-                None, partial(generate_workflow_content, name, description)
+                None, partial(generate_workflow_content, name, ai_notes.strip())
             )
         except Exception as exc:
             return RedirectResponse(url=f"/workflows?error={exc}", status_code=303)

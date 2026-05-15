@@ -43,8 +43,18 @@
 
     <div>
       <label class="block text-xs font-semibold text-gray-600 mb-1">Description</label>
-      <textarea name="description" rows="3"
-        placeholder="Describe the type of document and what should be checked. Required for AI generation."
+      <input type="text" name="description"
+        placeholder="Short label shown below the workflow name, e.g. Science content quality checks"
+        class="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+    </div>
+
+    <div class="border-t border-dashed border-indigo-200 pt-4">
+      <label class="block text-xs font-semibold text-indigo-600 mb-1">
+        AI Generation Notes
+        <span class="font-normal text-gray-400 ml-1">— only used when clicking "Create with AI"</span>
+      </label>
+      <textarea name="ai_notes" rows="4"
+        placeholder="Describe the categories and types of checks you want. Be as specific as you like.&#10;e.g. Check for factual accuracy in geography content, correct map labelling, timeline consistency, proper source citations, age-appropriate language..."
         class="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"></textarea>
     </div>
 
