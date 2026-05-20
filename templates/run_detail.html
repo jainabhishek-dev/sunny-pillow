@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% block title %}{{ run.document_name or "Run" }} — CheckPoint{% endblock %}
+
+{% block content %}
+
+<!-- Header -->
+<div class="mb-6">
+  <a href="/history" class="text-sm text-indigo-600 hover:text-indigo-800 font-medium transition">← Back to History</a>
+</div>
+
+<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-6">
+  <div class="flex items-start justify-between gap-4 flex-wrap">
+    <div>
+      <h2 class="text-xl font-bold text-gray-800">{{ run.document_name or "Untitled Document" }}</h2>
+      <div class="flex items-center gap-3 mt-2 flex-wrap">
+        <span class="text-xs px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600 font-medium">{{ run.workflow_name }}</span>
+        <span class="text-xs text-gray-400">{{ run.total_pages }} page{{ 's' if run.total_pages != 1 else '' }}</span>
+        <span class="text-xs text-gray-400">{{ run.total_findings }} finding{{ 's' if run.total_findings != 1 else '' }}</span>
+        <span class="text-xs text-gray-400">Checked by {{ run.checked_by }}</span>
+        <span class="text-xs text-gray-400">{{ run.created_at[:10] if run.created_at else "" }}</span>
+      </div>
+    </div>
+    {% if run.drive_url %}
+    <a href="{{ run.drive_url }}" target="_blank" rel="noopener noreferrer"
+      class="shrink-0 inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-indigo-600 font-medium transition px-3 py-1.5 rounded-lg border border-gray-200 hover:border-indigo-300">
+      Open original file ↗
+    </a>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Page-by-page sections -->
+<div class="space-y-4">
+  {% for page_num in range(1, total_pages + 1) %}
+  {% set findings = page_findings.get(page_num, []) %}
+  <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+
+    <!-- Page header -->
+    <div class="px-6 py-3 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
+      <span class="text-sm font-semibold text-gray-700">Page {{ page_num }}</span>
+      {% if findings %}
+      <span class="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-500 font-medium">
+        {{ findings | length }} finding{{ 's' if findings | length != 1 else '' }}
+      </span>
+      {% else %}
+      <span class="text-xs text-green-600 font-medium">No issues</span>
+      {% endif %}
+    </div>
+
+    <div class="flex gap-0 divide-x divide-gray-100">
+
+      <!-- Page image -->
+      <div class="w-1/2 p-4 flex items-start justify-center bg-gray-50">
+        {% if page_image_map.get(page_num) %}
+        <img
+          src="https://drive.google.com/uc?export=view&id={{ page_image_map[page_num] }}"
+          alt="Page {{ page_num }}"
+          class="w-full rounded border border-gray-200 shadow-sm"
+          loading="lazy"
+        />
+        {% else %}
+        <div class="w-full flex items-center justify-center py-12 text-gray-400 text-sm border border-dashed border-gray-300 rounded">
+          Image not available
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- Findings -->
+      <div class="w-1/2 p-4">
+        {% if findings %}
+        <div class="space-y-3">
+          {% for f in findings %}
+          <div class="border border-gray-100 rounded-xl p-3 bg-white">
+
+            <!-- Checkpoint + review badge -->
+            <div class="flex items-center justify-between gap-2 mb-2">
+              <span class="text-xs font-semibold text-indigo-600">
+                {{ checkpoint_map.get(f.checkpoint_id, f.checkpoint_id) }}
+              </span>
+              {% if f.review_status == 'valid' %}
+              <span class="text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-600 font-medium">Valid</span>
+              {% elif f.review_status == 'invalid' %}
+              <span class="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-500 font-medium">Invalid</span>
+              {% else %}
+              <span class="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-400 font-medium">—</span>
+              {% endif %}
+            </div>
+
+            <!-- Quote -->
+            {% if f.quote %}
+            <p class="text-xs text-gray-500 italic mb-1">"{{ f.quote }}"</p>
+            {% endif %}
+
+            <!-- Issue + suggestion -->
+            <p class="text-xs text-gray-700 mb-0.5"><span class="font-medium">Issue:</span> {{ f.issue }}</p>
+            {% if f.suggestion %}
+            <p class="text-xs text-gray-500"><span class="font-medium">Fix:</span> {{ f.suggestion }}</p>
+            {% endif %}
+
+            <!-- Review comment -->
+            {% if f.review_comment %}
+            <p class="text-xs text-gray-400 mt-1 italic">{{ f.review_comment }}</p>
+            {% endif %}
+
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="flex items-center justify-center h-full py-12 text-gray-400 text-sm">
+          No issues found on this page.
+        </div>
+        {% endif %}
+      </div>
+
+    </div>
+  </div>
+  {% endfor %}
+
+  <!-- Document-level findings -->
+  {% if doc_findings %}
+  <div class="bg-white rounded-2xl border border-indigo-100 shadow-sm overflow-hidden">
+    <div class="px-6 py-3 bg-indigo-50 border-b border-indigo-100 flex items-center justify-between">
+      <span class="text-sm font-semibold text-indigo-700">Document-level findings</span>
+      <span class="text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-600 font-medium">
+        {{ doc_findings | length }} finding{{ 's' if doc_findings | length != 1 else '' }}
+      </span>
+    </div>
+    <div class="p-4 space-y-3">
+      {% for f in doc_findings %}
+      <div class="border border-gray-100 rounded-xl p-3 bg-white">
+
+        <div class="flex items-center justify-between gap-2 mb-2">
+          <span class="text-xs font-semibold text-indigo-600">
+            {{ checkpoint_map.get(f.checkpoint_id, f.checkpoint_id) }}
+          </span>
+          {% if f.review_status == 'valid' %}
+          <span class="text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-600 font-medium">Valid</span>
+          {% elif f.review_status == 'invalid' %}
+          <span class="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-500 font-medium">Invalid</span>
+          {% else %}
+          <span class="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-400 font-medium">—</span>
+          {% endif %}
+        </div>
+
+        {% if f.quote %}
+        <p class="text-xs text-gray-500 italic mb-1">"{{ f.quote }}"</p>
+        {% endif %}
+
+        <p class="text-xs text-gray-700 mb-0.5"><span class="font-medium">Issue:</span> {{ f.issue }}</p>
+        {% if f.suggestion %}
+        <p class="text-xs text-gray-500"><span class="font-medium">Fix:</span> {{ f.suggestion }}</p>
+        {% endif %}
+
+        {% if f.review_comment %}
+        <p class="text-xs text-gray-400 mt-1 italic">{{ f.review_comment }}</p>
+        {% endif %}
+
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+</div>
+
+{% endblock %}

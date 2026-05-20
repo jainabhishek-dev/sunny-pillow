@@ -19,7 +19,7 @@ import auth
 import db
 from checker import run_vision_check, run_vision_review, run_document_check, run_document_review, generate_workflow_content
 from commenter import post_selected_comments
-from reader import get_file_as_pdf, get_pdf_bytes_by_id
+from reader import get_file_as_pdf, get_pdf_bytes_by_id, create_drive_subfolder, upload_jpeg_to_drive
 
 load_dotenv()
 
@@ -313,6 +313,8 @@ async def run_check(
     # Create a job and save metadata
     job_id = uuid.uuid4().hex
     _save_job(job_id, {
+        "drive_url": drive_url.strip(),
+        "checked_by": user["email"],
         "file_id": file_data["file_id"],
         "file_type": file_data["file_type"],
         "title": file_data["title"],
@@ -452,6 +454,7 @@ async def _stream_processing(job_id: str, token: dict, retry_from: int = None) -
 
                 for finding in findings:
                     finding["id"] = finding_id_counter
+                    finding["page_num"] = page_num
                     if "location" not in finding or finding["location"] == "":
                         finding["location"] = f"Page {page_num}"
                     all_findings.append(finding)
@@ -464,6 +467,14 @@ async def _stream_processing(job_id: str, token: dict, retry_from: int = None) -
                         None, partial(run_vision_review, img_bytes, findings, page_num)
                     )
                     yield f"event: page_review\ndata: {json.dumps({'page': page_num, 'reviews': reviews})}\n\n"
+
+                    # Merge review verdicts into findings (which are also referenced in all_findings)
+                    review_map = {r["finding_id"]: r for r in reviews}
+                    for f in findings:
+                        rev = review_map.get(f["id"])
+                        if rev:
+                            f["review_status"] = rev["verdict"]
+                            f["review_comment"] = rev["reason"]
 
                 # Explicitly free the page image — it is no longer needed and
                 # can be several MB; do not wait for GC.
@@ -522,6 +533,14 @@ async def _stream_processing(job_id: str, token: dict, retry_from: int = None) -
                     )
                     yield f"event: document_review\ndata: {json.dumps({'reviews': doc_reviews})}\n\n"
 
+                    # Merge review verdicts into doc_findings (also referenced in all_findings)
+                    doc_review_map = {r["finding_id"]: r for r in doc_reviews}
+                    for f in doc_findings:
+                        rev = doc_review_map.get(f["id"])
+                        if rev:
+                            f["review_status"] = rev["verdict"]
+                            f["review_comment"] = rev["reason"]
+
                 (job_dir / "findings.json").write_text(
                     json.dumps(all_findings, ensure_ascii=False), encoding="utf-8"
                 )
@@ -533,6 +552,62 @@ async def _stream_processing(job_id: str, token: dict, retry_from: int = None) -
         del pdf_bytes
 
         yield f"event: all_done\ndata: {json.dumps({'total_findings': len(all_findings)})}\n\n"
+
+        # ── Persist run to Supabase + Drive ───────────────────────────────────
+        runs_folder_id = os.getenv("DRIVE_RUNS_FOLDER_ID")
+        drive_folder_id = None
+        page_records: list[dict] = []
+
+        if runs_folder_id:
+            try:
+                drive_folder_id = await loop.run_in_executor(
+                    None, partial(create_drive_subfolder, token, runs_folder_id, job_id)
+                )
+                for img_path in sorted(job_dir.glob("page_*.jpg")):
+                    pg = int(img_path.stem.split("_")[1])
+                    img_data = img_path.read_bytes()
+                    file_id = await loop.run_in_executor(
+                        None, partial(upload_jpeg_to_drive, token, drive_folder_id, img_path.name, img_data)
+                    )
+                    page_records.append({"run_id": job_id, "page_num": pg, "drive_file_id": file_id})
+            except Exception as e:
+                print(f"[history] Drive upload failed for {job_id}: {e}")
+
+        try:
+            wf = next((w for w in WORKFLOWS if w["id"] == job.get("workflow_id")), {})
+            db.insert_run({
+                "id": job_id,
+                "workflow_id": job.get("workflow_id", ""),
+                "workflow_name": wf.get("name", job.get("workflow_id", "")),
+                "checked_by": job.get("checked_by", ""),
+                "document_name": job.get("title"),
+                "drive_url": job.get("drive_url"),
+                "file_type": job.get("file_type"),
+                "drive_folder_id": drive_folder_id,
+                "checkpoint_ids": job.get("checkpoint_ids", []),
+                "total_pages": total_pages,
+                "total_findings": len(all_findings),
+            })
+            if page_records:
+                db.insert_run_pages(page_records)
+            if all_findings:
+                db.insert_run_findings([
+                    {
+                        "run_id": job_id,
+                        "page_num": f.get("page_num"),
+                        "checkpoint_id": f.get("checkpoint_id"),
+                        "quote": f.get("quote"),
+                        "location": f.get("location"),
+                        "issue": f.get("issue"),
+                        "suggestion": f.get("suggestion"),
+                        "review_status": f.get("review_status"),
+                        "review_comment": f.get("review_comment"),
+                    }
+                    for f in all_findings
+                ])
+        except Exception as e:
+            # Log but do not surface to user — results already displayed
+            print(f"[history] Supabase save failed for {job_id}: {e}")
 
         job["status"] = "completed"
         job.pop("last_successful_page", None)
@@ -1021,3 +1096,55 @@ async def delete_workflow(request: Request, wf_id: str):
         return RedirectResponse(url="/workflows?success=Workflow+and+its+exclusive+checkpoints+deleted.", status_code=303)
     except Exception as exc:
         return RedirectResponse(url=f"/workflows?error={exc}", status_code=303)
+
+
+# ── Run history routes ─────────────────────────────────────────────────────────
+
+@app.get("/history", response_class=HTMLResponse)
+async def view_history(request: Request):
+    user = auth.get_current_user(request)
+    if not user:
+        return RedirectResponse(url="/login")
+
+    runs = db.fetch_runs()
+    return templates.TemplateResponse("history.html", _ctx(
+        request, user,
+        runs=runs,
+        error=request.query_params.get("error"),
+    ))
+
+
+@app.get("/history/{run_id}", response_class=HTMLResponse)
+async def view_run(request: Request, run_id: str):
+    user = auth.get_current_user(request)
+    if not user:
+        return RedirectResponse(url="/login")
+
+    run = db.fetch_run(run_id)
+    if not run:
+        return RedirectResponse(url="/history?error=Run+not+found.")
+
+    pages = db.fetch_run_pages(run_id)
+    findings = db.fetch_run_findings(run_id)
+
+    # Split into page findings (grouped by page_num) and document-level findings
+    page_findings: dict[int, list] = {}
+    doc_findings: list = []
+    for f in findings:
+        if f["page_num"] is None:
+            doc_findings.append(f)
+        else:
+            page_findings.setdefault(f["page_num"], []).append(f)
+
+    checkpoint_map = {cp["id"]: cp["category"] for cp in CHECKPOINTS}
+    page_image_map = {p["page_num"]: p["drive_file_id"] for p in pages}
+
+    return templates.TemplateResponse("run_detail.html", _ctx(
+        request, user,
+        run=run,
+        page_findings=page_findings,
+        doc_findings=doc_findings,
+        checkpoint_map=checkpoint_map,
+        page_image_map=page_image_map,
+        total_pages=run["total_pages"],
+    ))

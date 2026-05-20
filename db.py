@@ -166,3 +166,83 @@ def delete_admin(email: str) -> None:
         timeout=10,
     )
     resp.raise_for_status()
+
+
+# ── Run history helpers ───────────────────────────────────────────────────────
+
+def insert_run(row: dict) -> None:
+    resp = httpx.post(
+        f"{_base_url()}/runs",
+        headers=_headers(),
+        json=row,
+        timeout=15,
+    )
+    resp.raise_for_status()
+
+
+def insert_run_pages(rows: list[dict]) -> None:
+    """Batch-insert all page image records for a run in one call."""
+    resp = httpx.post(
+        f"{_base_url()}/run_pages",
+        headers=_headers(),
+        json=rows,
+        timeout=15,
+    )
+    resp.raise_for_status()
+
+
+def insert_run_findings(rows: list[dict]) -> None:
+    """Batch-insert all findings for a run in one call."""
+    resp = httpx.post(
+        f"{_base_url()}/run_findings",
+        headers=_headers(),
+        json=rows,
+        timeout=15,
+    )
+    resp.raise_for_status()
+
+
+def fetch_runs() -> list[dict]:
+    """Fetch all runs ordered by most recent first."""
+    resp = httpx.get(
+        f"{_base_url()}/runs",
+        headers=_headers(),
+        params={"order": "created_at.desc"},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def fetch_run(run_id: str) -> dict | None:
+    resp = httpx.get(
+        f"{_base_url()}/runs",
+        headers=_headers(),
+        params={"id": f"eq.{run_id}", "limit": "1"},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    return data[0] if data else None
+
+
+def fetch_run_pages(run_id: str) -> list[dict]:
+    resp = httpx.get(
+        f"{_base_url()}/run_pages",
+        headers=_headers(),
+        params={"run_id": f"eq.{run_id}", "order": "page_num"},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def fetch_run_findings(run_id: str) -> list[dict]:
+    resp = httpx.get(
+        f"{_base_url()}/run_findings",
+        headers=_headers(),
+        params={"run_id": f"eq.{run_id}", "order": "page_num.asc.nullslast,id.asc"},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    return resp.json()

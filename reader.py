@@ -123,6 +123,32 @@ def get_file_as_pdf(token: dict, drive_url: str) -> dict:
     }
 
 
+def create_drive_subfolder(token: dict, parent_folder_id: str, folder_name: str) -> str:
+    """Create a subfolder inside parent_folder_id. Returns the new folder's Drive file ID."""
+    creds = _build_credentials(token)
+    drive_service = _build_drive_service(creds)
+    metadata = {
+        "name": folder_name,
+        "mimeType": "application/vnd.google-apps.folder",
+        "parents": [parent_folder_id],
+    }
+    folder = drive_service.files().create(body=metadata, fields="id").execute()
+    return folder["id"]
+
+
+def upload_jpeg_to_drive(token: dict, folder_id: str, filename: str, image_bytes: bytes) -> str:
+    """Upload a JPEG image to a Drive folder. Returns the uploaded file's Drive file ID."""
+    from googleapiclient.http import MediaIoBaseUpload
+    creds = _build_credentials(token)
+    drive_service = _build_drive_service(creds)
+    metadata = {"name": filename, "parents": [folder_id]}
+    media = MediaIoBaseUpload(BytesIO(image_bytes), mimetype="image/jpeg")
+    file = drive_service.files().create(
+        body=metadata, media_body=media, fields="id"
+    ).execute()
+    return file["id"]
+
+
 def get_pdf_bytes_by_id(token: dict, file_id: str) -> dict:
     """
     Get PDF bytes for a file using its ID (without needing to parse a URL).
