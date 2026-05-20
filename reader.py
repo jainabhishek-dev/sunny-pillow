@@ -137,7 +137,9 @@ def create_drive_subfolder(token: dict, parent_folder_id: str, folder_name: str)
 
 
 def upload_jpeg_to_drive(token: dict, folder_id: str, filename: str, image_bytes: bytes) -> str:
-    """Upload a JPEG image to a Drive folder. Returns the uploaded file's Drive file ID."""
+    """Upload a JPEG image to a Drive folder. Returns the uploaded file's Drive file ID.
+    The file is explicitly shared as 'anyone with the link can view' so it can
+    be embedded directly in <img> tags without authentication."""
     from googleapiclient.http import MediaIoBaseUpload
     creds = _build_credentials(token)
     drive_service = _build_drive_service(creds)
@@ -146,7 +148,14 @@ def upload_jpeg_to_drive(token: dict, folder_id: str, filename: str, image_bytes
     file = drive_service.files().create(
         body=metadata, media_body=media, fields="id"
     ).execute()
-    return file["id"]
+    file_id = file["id"]
+    # Files uploaded via API do not inherit parent folder sharing settings.
+    # Explicitly make the file public so it can be embedded in <img> tags.
+    drive_service.permissions().create(
+        fileId=file_id,
+        body={"type": "anyone", "role": "reader"},
+    ).execute()
+    return file_id
 
 
 def get_pdf_bytes_by_id(token: dict, file_id: str) -> dict:
