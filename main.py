@@ -349,6 +349,76 @@ async def show_process(request: Request, job_id: str, retry_from: int = None):
     ))
 
 
+async def _save_run_to_history(
+    job_id: str,
+    job: dict,
+    all_findings: list,
+    total_pages: int,
+    token: dict,
+    job_dir: Path,
+) -> None:
+    """
+    Persists a completed run to Google Drive (page images) and Supabase
+    (run metadata + findings). Runs as an independent asyncio.Task so that
+    a client disconnect cannot cancel it.
+    """
+    loop = asyncio.get_running_loop()
+    runs_folder_id = os.getenv("DRIVE_RUNS_FOLDER_ID")
+    drive_folder_id = None
+    page_records: list[dict] = []
+
+    if runs_folder_id:
+        try:
+            drive_folder_id = await loop.run_in_executor(
+                None, partial(create_drive_subfolder, token, runs_folder_id, job_id)
+            )
+            for img_path in sorted(job_dir.glob("page_*.jpg")):
+                pg = int(img_path.stem.split("_")[1])
+                img_data = img_path.read_bytes()
+                file_id = await loop.run_in_executor(
+                    None, partial(upload_jpeg_to_drive, token, drive_folder_id, img_path.name, img_data)
+                )
+                page_records.append({"run_id": job_id, "page_num": pg, "drive_file_id": file_id})
+        except Exception as e:
+            print(f"[history] Drive upload failed for {job_id}: {e}")
+
+    try:
+        wf = next((w for w in WORKFLOWS if w["id"] == job.get("workflow_id")), {})
+        db.insert_run({
+            "id": job_id,
+            "workflow_id": job.get("workflow_id", ""),
+            "workflow_name": wf.get("name", job.get("workflow_id", "")),
+            "checked_by": job.get("checked_by", ""),
+            "document_name": job.get("title"),
+            "drive_url": job.get("drive_url"),
+            "file_type": job.get("file_type"),
+            "drive_folder_id": drive_folder_id,
+            "checkpoint_ids": job.get("checkpoint_ids", []),
+            "total_pages": total_pages,
+            "total_findings": len(all_findings),
+        })
+        if page_records:
+            db.insert_run_pages(page_records)
+        if all_findings:
+            db.insert_run_findings([
+                {
+                    "run_id": job_id,
+                    "page_num": f.get("page_num"),
+                    "checkpoint_id": f.get("checkpoint_id"),
+                    "quote": f.get("quote"),
+                    "location": f.get("location"),
+                    "issue": f.get("issue"),
+                    "suggestion": f.get("suggestion"),
+                    "review_status": f.get("review_status"),
+                    "review_comment": f.get("review_comment"),
+                }
+                for f in all_findings
+            ])
+        print(f"[history] Run {job_id} saved: {total_pages} pages, {len(all_findings)} findings.")
+    except Exception as e:
+        print(f"[history] Supabase save failed for {job_id}: {e}")
+
+
 async def _stream_processing(job_id: str, token: dict, retry_from: int = None) -> None:
     """
     SSE endpoint that processes a PDF page-by-page.
@@ -551,63 +621,19 @@ async def _stream_processing(job_id: str, token: dict, retry_from: int = None) -
         # Free PDF bytes — document-level check is complete.
         del pdf_bytes
 
+        # Schedule history save BEFORE yielding all_done. The task is already
+        # queued on the event loop, so a client disconnect after all_done
+        # cannot cancel it. Snapshots are passed so mutations below are safe.
+        asyncio.create_task(_save_run_to_history(
+            job_id=job_id,
+            job=dict(job),
+            all_findings=list(all_findings),
+            total_pages=total_pages,
+            token=token,
+            job_dir=job_dir,
+        ))
+
         yield f"event: all_done\ndata: {json.dumps({'total_findings': len(all_findings)})}\n\n"
-
-        # ── Persist run to Supabase + Drive ───────────────────────────────────
-        runs_folder_id = os.getenv("DRIVE_RUNS_FOLDER_ID")
-        drive_folder_id = None
-        page_records: list[dict] = []
-
-        if runs_folder_id:
-            try:
-                drive_folder_id = await loop.run_in_executor(
-                    None, partial(create_drive_subfolder, token, runs_folder_id, job_id)
-                )
-                for img_path in sorted(job_dir.glob("page_*.jpg")):
-                    pg = int(img_path.stem.split("_")[1])
-                    img_data = img_path.read_bytes()
-                    file_id = await loop.run_in_executor(
-                        None, partial(upload_jpeg_to_drive, token, drive_folder_id, img_path.name, img_data)
-                    )
-                    page_records.append({"run_id": job_id, "page_num": pg, "drive_file_id": file_id})
-            except Exception as e:
-                print(f"[history] Drive upload failed for {job_id}: {e}")
-
-        try:
-            wf = next((w for w in WORKFLOWS if w["id"] == job.get("workflow_id")), {})
-            db.insert_run({
-                "id": job_id,
-                "workflow_id": job.get("workflow_id", ""),
-                "workflow_name": wf.get("name", job.get("workflow_id", "")),
-                "checked_by": job.get("checked_by", ""),
-                "document_name": job.get("title"),
-                "drive_url": job.get("drive_url"),
-                "file_type": job.get("file_type"),
-                "drive_folder_id": drive_folder_id,
-                "checkpoint_ids": job.get("checkpoint_ids", []),
-                "total_pages": total_pages,
-                "total_findings": len(all_findings),
-            })
-            if page_records:
-                db.insert_run_pages(page_records)
-            if all_findings:
-                db.insert_run_findings([
-                    {
-                        "run_id": job_id,
-                        "page_num": f.get("page_num"),
-                        "checkpoint_id": f.get("checkpoint_id"),
-                        "quote": f.get("quote"),
-                        "location": f.get("location"),
-                        "issue": f.get("issue"),
-                        "suggestion": f.get("suggestion"),
-                        "review_status": f.get("review_status"),
-                        "review_comment": f.get("review_comment"),
-                    }
-                    for f in all_findings
-                ])
-        except Exception as e:
-            # Log but do not surface to user — results already displayed
-            print(f"[history] Supabase save failed for {job_id}: {e}")
 
         job["status"] = "completed"
         job.pop("last_successful_page", None)
