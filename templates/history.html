@@ -39,7 +39,18 @@
         <td class="px-6 py-4 text-gray-600">{{ run.workflow_name }}</td>
         <td class="px-6 py-4 text-gray-500 text-xs">{{ run.checked_by }}</td>
         <td class="px-6 py-4 text-gray-400 text-xs whitespace-nowrap">
-          {{ run.created_at[:10] if run.created_at else "—" }}
+          {% if run.created_at %}
+            {{ run.created_at[:10] }}<br>
+            <span class="text-gray-300">
+              {% set h = run.created_at[11:13] | int %}
+              {% set m = run.created_at[14:16] %}
+              {% if h == 0 %}12:{{ m }} AM
+              {% elif h < 12 %}{{ h }}:{{ m }} AM
+              {% elif h == 12 %}12:{{ m }} PM
+              {% else %}{{ h - 12 }}:{{ m }} PM
+              {% endif %}
+            </span>
+          {% else %}—{% endif %}
         </td>
         <td class="px-6 py-4 text-center text-gray-500">{{ run.total_pages }}</td>
         <td class="px-6 py-4 text-center">
