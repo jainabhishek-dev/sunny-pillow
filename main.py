@@ -4,6 +4,7 @@ import os
 import re
 import tempfile
 import uuid
+from datetime import datetime, timezone, timedelta
 from functools import partial
 from pathlib import Path
 from typing import Annotated
@@ -1126,6 +1127,22 @@ async def delete_workflow(request: Request, wf_id: str):
 
 # ── Run history routes ─────────────────────────────────────────────────────────
 
+_IST = timezone(timedelta(hours=5, minutes=30))
+
+def _to_ist(dt_str: str | None) -> str | None:
+    """Convert a UTC datetime string from Supabase to IST, keeping the same
+    'YYYY-MM-DD HH:MM:SS' format so template string-slicing still works."""
+    if not dt_str:
+        return dt_str
+    try:
+        dt = datetime.fromisoformat(dt_str.replace(" ", "T"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(_IST).strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return dt_str
+
+
 @app.get("/history", response_class=HTMLResponse)
 async def view_history(request: Request):
     user = auth.get_current_user(request)
@@ -1133,6 +1150,8 @@ async def view_history(request: Request):
         return RedirectResponse(url="/login")
 
     runs = db.fetch_runs()
+    for run in runs:
+        run["created_at"] = _to_ist(run.get("created_at"))
     return templates.TemplateResponse("history.html", _ctx(
         request, user,
         runs=runs,
@@ -1149,6 +1168,7 @@ async def view_run(request: Request, run_id: str):
     run = db.fetch_run(run_id)
     if not run:
         return RedirectResponse(url="/history?error=Run+not+found.")
+    run["created_at"] = _to_ist(run.get("created_at"))
 
     pages = db.fetch_run_pages(run_id)
     findings = db.fetch_run_findings(run_id)
