@@ -18,7 +18,8 @@
 
 {% if runs %}
 <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-  <table class="w-full text-sm">
+  <div class="overflow-x-auto">
+  <table class="w-full text-sm min-w-[720px]">
     <thead>
       <tr class="border-b border-gray-100 bg-gray-50">
         <th class="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Document</th>
@@ -72,6 +73,7 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
 </div>
 
 {% else %}

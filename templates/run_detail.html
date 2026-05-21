@@ -47,10 +47,10 @@
       {% endif %}
     </div>
 
-    <div class="flex gap-0 divide-x divide-gray-100">
+    <div class="flex gap-0 divide-x divide-gray-100 h-[700px]">
 
       <!-- Page image -->
-      <div class="w-1/2 p-4 flex items-start justify-center bg-gray-50">
+      <div class="w-1/2 p-4 flex items-start justify-center bg-gray-50 overflow-y-auto">
         {% if page_image_map.get(page_num) %}
         <img
           src="https://lh3.googleusercontent.com/d/{{ page_image_map[page_num] }}"
@@ -66,7 +66,7 @@
       </div>
 
       <!-- Findings -->
-      <div class="w-1/2 p-4">
+      <div class="w-1/2 p-4 overflow-y-auto">
         {% if findings %}
         <div class="space-y-3">
           {% for f in findings %}
