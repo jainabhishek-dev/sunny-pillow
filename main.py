@@ -1149,12 +1149,23 @@ async def view_history(request: Request):
     if not user:
         return RedirectResponse(url="/login")
 
-    runs = db.fetch_runs()
+    selected_workflow_id = request.query_params.get("workflow") or None
+    runs = db.fetch_runs(workflow_id=selected_workflow_id)
     for run in runs:
         run["created_at"] = _to_ist(run.get("created_at"))
+
+    # Fetch valid/invalid counts for all visible runs in one query
+    counts = db.fetch_finding_counts([r["id"] for r in runs])
+    for run in runs:
+        c = counts.get(run["id"], {"valid": 0, "invalid": 0})
+        run["valid_findings"] = c["valid"]
+        run["invalid_findings"] = c["invalid"]
+
     return templates.TemplateResponse("history.html", _ctx(
         request, user,
         runs=runs,
+        workflows=WORKFLOWS,
+        selected_workflow_id=selected_workflow_id,
         error=request.query_params.get("error"),
     ))
 
