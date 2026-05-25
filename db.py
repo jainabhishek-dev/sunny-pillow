@@ -217,31 +217,6 @@ def fetch_runs(workflow_id: str | None = None) -> list[dict]:
     return resp.json()
 
 
-def fetch_finding_counts(run_ids: list[str]) -> dict[str, dict]:
-    """
-    Return valid/invalid finding counts for a list of run IDs in a single query.
-    Result: {run_id: {"valid": n, "invalid": n}}
-    """
-    if not run_ids:
-        return {}
-    ids_param = "(" + ",".join(run_ids) + ")"
-    resp = httpx.get(
-        f"{_base_url()}/run_findings",
-        headers=_headers(),
-        params={"run_id": f"in.{ids_param}", "select": "run_id,review_status"},
-        timeout=10,
-    )
-    resp.raise_for_status()
-    counts: dict[str, dict] = {}
-    for row in resp.json():
-        rid = row["run_id"]
-        if rid not in counts:
-            counts[rid] = {"valid": 0, "invalid": 0}
-        if row["review_status"] == "valid":
-            counts[rid]["valid"] += 1
-        elif row["review_status"] == "invalid":
-            counts[rid]["invalid"] += 1
-    return counts
 
 
 def fetch_run(run_id: str) -> dict | None:

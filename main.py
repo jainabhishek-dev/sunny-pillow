@@ -397,6 +397,8 @@ async def _save_run_to_history(
             "checkpoint_ids": job.get("checkpoint_ids", []),
             "total_pages": total_pages,
             "total_findings": len(all_findings),
+            "valid_findings": sum(1 for f in all_findings if f.get("review_status") == "valid"),
+            "invalid_findings": sum(1 for f in all_findings if f.get("review_status") == "invalid"),
         })
         if page_records:
             db.insert_run_pages(page_records)
@@ -1153,13 +1155,6 @@ async def view_history(request: Request):
     runs = db.fetch_runs(workflow_id=selected_workflow_id)
     for run in runs:
         run["created_at"] = _to_ist(run.get("created_at"))
-
-    # Fetch valid/invalid counts for all visible runs in one query
-    counts = db.fetch_finding_counts([r["id"] for r in runs])
-    for run in runs:
-        c = counts.get(run["id"], {"valid": 0, "invalid": 0})
-        run["valid_findings"] = c["valid"]
-        run["invalid_findings"] = c["invalid"]
 
     return templates.TemplateResponse("history.html", _ctx(
         request, user,
