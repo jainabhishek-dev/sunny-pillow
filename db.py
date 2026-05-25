@@ -251,3 +251,15 @@ def fetch_run_findings(run_id: str) -> list[dict]:
     )
     resp.raise_for_status()
     return resp.json()
+
+
+def update_finding_review(finding_id: str, review_status: str, review_comment: str) -> None:
+    """Overwrite the review verdict and comment on a single finding."""
+    resp = httpx.patch(
+        f"{_base_url()}/run_findings",
+        headers=_headers(),
+        params={"id": f"eq.{finding_id}"},
+        json={"review_status": review_status, "review_comment": review_comment},
+        timeout=10,
+    )
+    resp.raise_for_status()

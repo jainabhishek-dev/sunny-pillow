@@ -1200,3 +1200,25 @@ async def view_run(request: Request, run_id: str):
         page_image_map=page_image_map,
         total_pages=run["total_pages"],
     ))
+
+
+@app.post("/findings/{finding_id}/review")
+async def update_finding_review(request: Request, finding_id: str):
+    user = auth.get_current_user(request)
+    if not user:
+        return {"error": "Unauthorized"}, 401
+
+    body = await request.json()
+    review_status = body.get("review_status", "").strip()
+    review_comment = body.get("review_comment", "").strip()
+
+    if review_status not in ("valid", "invalid"):
+        return {"error": "review_status must be 'valid' or 'invalid'"}
+    if not review_comment:
+        return {"error": "review_comment is required"}
+
+    try:
+        db.update_finding_review(finding_id, review_status, review_comment)
+        return {"ok": True}
+    except Exception as e:
+        return {"error": str(e)}
