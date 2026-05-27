@@ -20,7 +20,7 @@ import auth
 import db
 from checker import run_vision_check, run_vision_review, run_document_check, run_document_review, generate_workflow_content, run_cic_check, run_cic_global_check
 from commenter import post_selected_comments
-from reader import get_file_as_pdf, get_pdf_bytes_by_id, create_drive_subfolder, upload_jpeg_to_drive, fetch_drive_comments_with_pages
+from reader import get_file_as_pdf, get_pdf_bytes_by_id, create_drive_subfolder, upload_jpeg_to_drive, fetch_drive_comments_with_pages, extract_pdf_annotations
 
 load_dotenv()
 
@@ -470,32 +470,23 @@ async def _save_run_to_history(
     job_dir: Path,
 ) -> None:
     """
-    Persists a completed run to Google Drive (page images) and Supabase
-    (run metadata + findings). Runs as an independent asyncio.Task so that
-    a client disconnect cannot cancel it.
+    Persists a completed run to Supabase (immediately) and then to Google Drive
+    (page images, slow). Runs as an independent asyncio.Task so that a client
+    disconnect cannot cancel it.
+
+    Order:
+      1. insert_run (with drive_folder_id=None) — run visible in history immediately
+      2. insert_run_findings — findings visible immediately
+      3. Upload page images to Drive (slow)
+      4. insert_run_pages
+      5. update_run to back-fill drive_folder_id
     """
     loop = asyncio.get_running_loop()
     runs_folder_id = os.getenv("DRIVE_RUNS_FOLDER_ID")
-    drive_folder_id = None
-    page_records: list[dict] = []
+    wf = next((w for w in WORKFLOWS if w["id"] == job.get("workflow_id")), {})
 
-    if runs_folder_id:
-        try:
-            drive_folder_id = await loop.run_in_executor(
-                None, partial(create_drive_subfolder, token, runs_folder_id, job_id)
-            )
-            for img_path in sorted(job_dir.glob("page_*.jpg")):
-                pg = int(img_path.stem.split("_")[1])
-                img_data = img_path.read_bytes()
-                file_id = await loop.run_in_executor(
-                    None, partial(upload_jpeg_to_drive, token, drive_folder_id, img_path.name, img_data)
-                )
-                page_records.append({"run_id": job_id, "page_num": pg, "drive_file_id": file_id})
-        except Exception as e:
-            print(f"[history] Drive upload failed for {job_id}: {e}")
-
+    # ── Step 1 & 2: Insert to Supabase immediately ────────────────────────────
     try:
-        wf = next((w for w in WORKFLOWS if w["id"] == job.get("workflow_id")), {})
         db.insert_run({
             "id": job_id,
             "workflow_id": job.get("workflow_id", ""),
@@ -504,15 +495,13 @@ async def _save_run_to_history(
             "document_name": job.get("title"),
             "drive_url": job.get("drive_url"),
             "file_type": job.get("file_type"),
-            "drive_folder_id": drive_folder_id,
+            "drive_folder_id": None,
             "checkpoint_ids": job.get("checkpoint_ids", []),
             "total_pages": total_pages,
             "total_findings": len(all_findings),
             "valid_findings": sum(1 for f in all_findings if f.get("review_status") == "valid"),
             "invalid_findings": sum(1 for f in all_findings if f.get("review_status") == "invalid"),
         })
-        if page_records:
-            db.insert_run_pages(page_records)
         if all_findings:
             db.insert_run_findings([
                 {
@@ -528,9 +517,34 @@ async def _save_run_to_history(
                 }
                 for f in all_findings
             ])
-        print(f"[history] Run {job_id} saved: {total_pages} pages, {len(all_findings)} findings.")
+        print(f"[history] Run {job_id} saved to Supabase: {total_pages} pages, {len(all_findings)} findings.")
     except Exception as e:
         print(f"[history] Supabase save failed for {job_id}: {e}")
+        return  # don't attempt Drive upload if DB save failed
+
+    # ── Steps 3–5: Upload images to Drive then back-fill folder ID ────────────
+    if not runs_folder_id:
+        return
+
+    page_records: list[dict] = []
+    try:
+        drive_folder_id = await loop.run_in_executor(
+            None, partial(create_drive_subfolder, token, runs_folder_id, job_id)
+        )
+        for img_path in sorted(job_dir.glob("page_*.jpg")):
+            pg = int(img_path.stem.split("_")[1])
+            img_data = img_path.read_bytes()
+            file_id = await loop.run_in_executor(
+                None, partial(upload_jpeg_to_drive, token, drive_folder_id, img_path.name, img_data)
+            )
+            page_records.append({"run_id": job_id, "page_num": pg, "drive_file_id": file_id})
+
+        if page_records:
+            db.insert_run_pages(page_records)
+        db.update_run(job_id, {"drive_folder_id": drive_folder_id})
+        print(f"[history] Run {job_id} Drive upload complete: {len(page_records)} images.")
+    except Exception as e:
+        print(f"[history] Drive upload failed for {job_id}: {e}")
 
 
 def _apply_cic_verdict(current: str, new_verdict: str) -> str:
@@ -559,42 +573,26 @@ async def _save_cic_run_to_history(
     job_dir: Path,
 ) -> None:
     """
-    Persist a completed CIC run to Google Drive (page images) and Supabase.
-    Runs as an independent asyncio.Task so client disconnect cannot cancel it.
+    Persist a completed CIC run to Supabase (immediately) then Google Drive
+    (page images, slow). Runs as an independent asyncio.Task so client disconnect
+    cannot cancel it.
+
+    Order:
+      1. insert_cic_run (drive_folder_id=None) — visible in history immediately
+      2. insert_cic_comments — verdicts visible immediately
+      3. Upload page images to Drive (slow)
+      4. insert_cic_run_pages
+      5. update_cic_run to back-fill drive_folder_id
     """
     loop = asyncio.get_running_loop()
     runs_folder_id = os.getenv("DRIVE_RUNS_FOLDER_ID")
-    drive_folder_id = None
-    page_records: list[dict] = []
 
-    if runs_folder_id:
-        try:
-            drive_folder_id = await loop.run_in_executor(
-                None, partial(create_drive_subfolder, token, runs_folder_id, f"cic_{job_id}")
-            )
-            # Upload file1 and file2 page images
-            for img_path in sorted(job_dir.glob("f?_page_*.jpg")):
-                parts = img_path.stem.split("_")  # ["f1","page","001"] or ["f2","page","001"]
-                file_version = "commented" if parts[0] == "f1" else "revised"
-                pg = int(parts[2])
-                img_data = img_path.read_bytes()
-                drive_file_id = await loop.run_in_executor(
-                    None, partial(upload_jpeg_to_drive, token, drive_folder_id, img_path.name, img_data)
-                )
-                page_records.append({
-                    "run_id": job_id,
-                    "page_num": pg,
-                    "file_version": file_version,
-                    "drive_file_id": drive_file_id,
-                })
-        except Exception as e:
-            print(f"[cic-history] Drive upload failed for {job_id}: {e}")
+    fixed = sum(1 for c in comment_tracker.values() if c["verdict"] == "fixed")
+    not_fixed = sum(1 for c in comment_tracker.values() if c["verdict"] == "not_fixed")
+    not_sure = sum(1 for c in comment_tracker.values() if c["verdict"] == "not_sure")
 
+    # ── Steps 1 & 2: Insert to Supabase immediately ───────────────────────────
     try:
-        fixed = sum(1 for c in comment_tracker.values() if c["verdict"] == "fixed")
-        not_fixed = sum(1 for c in comment_tracker.values() if c["verdict"] == "not_fixed")
-        not_sure = sum(1 for c in comment_tracker.values() if c["verdict"] == "not_sure")
-
         db.insert_cic_run({
             "id": job_id,
             "workflow_id": job.get("workflow_id", ""),
@@ -604,19 +602,16 @@ async def _save_cic_run_to_history(
             "commented_drive_url": job.get("commented_drive_url"),
             "revised_file_name": job.get("revised_file_title"),
             "revised_drive_url": job.get("revised_drive_url"),
-            "drive_folder_id": drive_folder_id,
+            "drive_folder_id": None,
             "total_pages": total_pages,
             "total_comments": len(comment_tracker),
             "fixed_count": fixed,
             "not_fixed_count": not_fixed,
             "not_sure_count": not_sure,
         })
-        if page_records:
-            db.insert_cic_run_pages(page_records)
         if comment_tracker:
-            comment_rows = []
-            for cid, info in comment_tracker.items():
-                comment_rows.append({
+            comment_rows = [
+                {
                     "run_id": job_id,
                     "comment_id": cid,
                     "author": info.get("author", ""),
@@ -624,11 +619,45 @@ async def _save_cic_run_to_history(
                     "verdict": info["verdict"],
                     "reason": info.get("reason", ""),
                     "page_resolved": info.get("page_resolved"),
-                })
+                }
+                for cid, info in comment_tracker.items()
+            ]
             db.insert_cic_comments(comment_rows)
-        print(f"[cic-history] Run {job_id} saved: {total_pages} pages, {len(comment_tracker)} comments.")
+        print(f"[cic-history] Run {job_id} saved to Supabase: {total_pages} pages, {len(comment_tracker)} comments.")
     except Exception as e:
         print(f"[cic-history] Supabase save failed for {job_id}: {e}")
+        return  # don't attempt Drive upload if DB save failed
+
+    # ── Steps 3–5: Upload images to Drive then back-fill folder ID ────────────
+    if not runs_folder_id:
+        return
+
+    page_records: list[dict] = []
+    try:
+        drive_folder_id = await loop.run_in_executor(
+            None, partial(create_drive_subfolder, token, runs_folder_id, f"cic_{job_id}")
+        )
+        for img_path in sorted(job_dir.glob("f?_page_*.jpg")):
+            parts = img_path.stem.split("_")  # ["f1","page","001"] or ["f2","page","001"]
+            file_version = "commented" if parts[0] == "f1" else "revised"
+            pg = int(parts[2])
+            img_data = img_path.read_bytes()
+            drive_file_id = await loop.run_in_executor(
+                None, partial(upload_jpeg_to_drive, token, drive_folder_id, img_path.name, img_data)
+            )
+            page_records.append({
+                "run_id": job_id,
+                "page_num": pg,
+                "file_version": file_version,
+                "drive_file_id": drive_file_id,
+            })
+
+        if page_records:
+            db.insert_cic_run_pages(page_records)
+        db.update_cic_run(job_id, {"drive_folder_id": drive_folder_id})
+        print(f"[cic-history] Run {job_id} Drive upload complete: {len(page_records)} images.")
+    except Exception as e:
+        print(f"[cic-history] Drive upload failed for {job_id}: {e}")
 
 
 async def _stream_cic_processing(job_id: str, token: dict):
@@ -650,16 +679,6 @@ async def _stream_cic_processing(job_id: str, token: dict):
         if not all_comments:
             yield f"event: error\ndata: {json.dumps({'message': 'No comments found in job.'})}\n\n"
             return
-
-        # Split comments into page buckets and global bucket
-        page_comments_map: dict[int, list[dict]] = {}
-        global_comments: list[dict] = []
-        for c in all_comments:
-            pn = c.get("page_num")
-            if pn and isinstance(pn, int) and pn > 0:
-                page_comments_map.setdefault(pn, []).append(c)
-            else:
-                global_comments.append(c)
 
         # Initialise verdict tracker
         comment_tracker: dict[str, dict] = {}
@@ -690,6 +709,44 @@ async def _stream_cic_processing(job_id: str, token: dict):
         except Exception as e:
             yield f"event: error\ndata: {json.dumps({'message': f'Could not load revised file: {str(e)}'})}\n\n"
             return
+
+        # Enrich page_num for Drive comments that lack an anchor (e.g. Adobe PDF
+        # annotations). Comments added natively in Drive already have page_num set
+        # from the anchor — those are left untouched. Only comments with
+        # page_num = None are matched against fitz annotations by content.
+        try:
+            fitz_annots = await loop.run_in_executor(
+                None, partial(extract_pdf_annotations, f1_bytes)
+            )
+            if fitz_annots:
+                def _norm(s: str) -> str:
+                    return re.sub(r'\s+', ' ', (s or '').strip())
+
+                unmatched = list(fitz_annots)  # consume greedy, preserving page order
+                for c in all_comments:
+                    if c.get("page_num") is not None:
+                        continue  # Drive-native comment — already has page number
+                    key = _norm(c.get("content", ""))
+                    if not key:
+                        continue  # empty comment stays in global bucket
+                    for i, annot in enumerate(unmatched):
+                        if _norm(annot["content"]) == key:
+                            c["page_num"] = annot["page_num"]
+                            unmatched.pop(i)
+                            break
+        except Exception as e:
+            # Non-fatal: if fitz extraction fails, comments remain in global bucket
+            print(f"[cic] fitz annotation extraction failed for {job_id}: {e}")
+
+        # Split comments into page buckets and global bucket (after enrichment)
+        page_comments_map: dict[int, list[dict]] = {}
+        global_comments: list[dict] = []
+        for c in all_comments:
+            pn = c.get("page_num")
+            if pn and isinstance(pn, int) and pn > 0:
+                page_comments_map.setdefault(pn, []).append(c)
+            else:
+                global_comments.append(c)
 
         try:
             f1_doc = fitz.open(stream=BytesIO(f1_bytes), filetype="pdf")

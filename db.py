@@ -336,6 +336,30 @@ def fetch_cic_comments(run_id: str) -> list[dict]:
     return resp.json()
 
 
+def update_run(run_id: str, fields: dict) -> None:
+    """PATCH arbitrary fields on a run row (e.g. back-fill drive_folder_id)."""
+    resp = httpx.patch(
+        f"{_base_url()}/runs",
+        headers=_headers(),
+        params={"id": f"eq.{run_id}"},
+        json=fields,
+        timeout=10,
+    )
+    resp.raise_for_status()
+
+
+def update_cic_run(run_id: str, fields: dict) -> None:
+    """PATCH arbitrary fields on a cic_run row (e.g. back-fill drive_folder_id)."""
+    resp = httpx.patch(
+        f"{_base_url()}/cic_runs",
+        headers=_headers(),
+        params={"id": f"eq.{run_id}"},
+        json=fields,
+        timeout=10,
+    )
+    resp.raise_for_status()
+
+
 def update_finding_review(finding_id: str, review_status: str, review_comment: str) -> None:
     """Overwrite the review verdict and comment on a single finding."""
     resp = httpx.patch(

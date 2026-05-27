@@ -204,6 +204,29 @@ def fetch_drive_comments_with_pages(token: dict, file_id: str) -> list[dict]:
     return results
 
 
+def extract_pdf_annotations(pdf_bytes: bytes) -> list[dict]:
+    """Extract text annotations from a PDF using PyMuPDF.
+
+    Returns a list of {"content": str, "page_num": int} in page order (1-based).
+    Only annotations with non-empty content are included.
+    Used as a fallback to assign page numbers to Drive comments that lack an anchor
+    (e.g. comments added in Adobe Acrobat and uploaded to Drive as a PDF).
+    """
+    import fitz  # PyMuPDF — already a project dependency
+
+    results = []
+    doc = fitz.open(stream=BytesIO(pdf_bytes), filetype="pdf")
+    try:
+        for page_idx in range(len(doc)):
+            for annot in doc[page_idx].annots():
+                content = (annot.info.get("content") or "").strip()
+                if content:
+                    results.append({"content": content, "page_num": page_idx + 1})
+    finally:
+        doc.close()
+    return results
+
+
 def get_pdf_bytes_by_id(token: dict, file_id: str) -> dict:
     """
     Get PDF bytes for a file using its ID (without needing to parse a URL).
