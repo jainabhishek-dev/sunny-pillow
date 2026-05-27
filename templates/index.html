@@ -18,26 +18,117 @@
 
 <!-- Workflow selection (shown before a workflow is selected) -->
 {% if not selected_workflow %}
-<div class="mb-8">
-  <h3 class="text-sm font-semibold text-gray-700 mb-4">Select a Workflow</h3>
-  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-    {% for workflow in workflows %}
-    <a href="/?workflow={{ workflow.id }}"
-      class="bg-white rounded-xl shadow-sm border border-gray-200 p-6 text-left hover:border-indigo-300 hover:shadow-md transition cursor-pointer group no-underline block">
-      <h4 class="text-lg font-semibold text-gray-800 group-hover:text-indigo-600 transition">
-        {{ workflow.name }}
-      </h4>
-      <p class="text-sm text-gray-500 mt-1">
-        {{ workflow.description }}
-      </p>
-    </a>
-    {% endfor %}
+<div class="mb-8 space-y-8">
+
+  {% if review_workflows %}
+  <div>
+    <h3 class="text-sm font-semibold text-gray-700 mb-4">Review Workflows</h3>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {% for workflow in review_workflows %}
+      <a href="/?workflow={{ workflow.id }}"
+        class="bg-white rounded-xl shadow-sm border border-gray-200 p-6 text-left hover:border-indigo-300 hover:shadow-md transition cursor-pointer group no-underline block">
+        <h4 class="text-lg font-semibold text-gray-800 group-hover:text-indigo-600 transition">
+          {{ workflow.name }}
+        </h4>
+        <p class="text-sm text-gray-500 mt-1">{{ workflow.description }}</p>
+      </a>
+      {% endfor %}
+    </div>
   </div>
+  {% endif %}
+
+  {% if cic_workflows %}
+  <div>
+    <h3 class="text-sm font-semibold text-gray-700 mb-4">CIC Workflows
+      <span class="ml-2 text-xs font-normal text-gray-400">Comment Incorporation Check</span>
+    </h3>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {% for workflow in cic_workflows %}
+      <a href="/?workflow={{ workflow.id }}"
+        class="bg-white rounded-xl shadow-sm border border-purple-100 p-6 text-left hover:border-purple-300 hover:shadow-md transition cursor-pointer group no-underline block">
+        <div class="flex items-center gap-2 mb-1">
+          <h4 class="text-lg font-semibold text-gray-800 group-hover:text-purple-700 transition">
+            {{ workflow.name }}
+          </h4>
+          <span class="text-xs px-1.5 py-0.5 rounded-full bg-purple-50 text-purple-600 font-medium">CIC</span>
+        </div>
+        <p class="text-sm text-gray-500 mt-1">{{ workflow.description }}</p>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
 </div>
 {% endif %}
 
-<!-- Form (shown only when workflow is selected) -->
-{% if selected_workflow %}
+<!-- CIC form (shown only when a CIC workflow is selected) -->
+{% if selected_workflow and selected_workflow.get('type') == 'cic' %}
+<form method="POST" action="/cic-check" id="cicForm">
+  <input type="hidden" name="workflow_id" value="{{ selected_workflow.id }}" />
+
+  <div class="flex items-center justify-between mb-6 pb-4 border-b border-gray-200">
+    <div class="flex items-center gap-2">
+      <div>
+        <p class="text-xs text-gray-500">Selected workflow</p>
+        <p class="text-sm font-semibold text-gray-800">{{ selected_workflow.name }}</p>
+      </div>
+      <span class="text-xs px-1.5 py-0.5 rounded-full bg-purple-50 text-purple-600 font-medium">CIC</span>
+    </div>
+    <a href="/" class="text-sm text-indigo-600 hover:text-indigo-800 font-medium transition">
+      Change workflow
+    </a>
+  </div>
+
+  <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6 space-y-5">
+    <div>
+      <label class="block text-sm font-semibold text-gray-700 mb-2" for="commented_url">
+        Commented File (Original PDF)
+      </label>
+      <input
+        type="url"
+        name="commented_url"
+        id="commented_url"
+        required
+        placeholder="https://drive.google.com/file/d/..."
+        class="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent transition"
+      />
+      <p class="text-xs text-gray-400 mt-2">The original PDF that reviewers added comments to.</p>
+    </div>
+
+    <div>
+      <label class="block text-sm font-semibold text-gray-700 mb-2" for="revised_url">
+        Revised File (Updated PDF)
+      </label>
+      <input
+        type="url"
+        name="revised_url"
+        id="revised_url"
+        required
+        placeholder="https://drive.google.com/file/d/..."
+        class="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent transition"
+      />
+      <p class="text-xs text-gray-400 mt-2">The revised PDF that should have addressed the reviewer comments.</p>
+    </div>
+  </div>
+
+  <div class="flex justify-end">
+    <button type="submit" id="cicSubmitBtn"
+      class="inline-flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white font-semibold px-8 py-3 rounded-xl transition shadow-sm">
+      <span id="cicBtnText">Run CIC Check</span>
+      <span id="cicBtnSpinner" class="hidden">
+        <svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+        </svg>
+      </span>
+    </button>
+  </div>
+</form>
+{% endif %}
+
+<!-- Review form (shown only when a Review workflow is selected) -->
+{% if selected_workflow and selected_workflow.get('type', 'review') == 'review' %}
 <form method="POST" action="/check" id="checkForm">
   <input type="hidden" name="workflow_id" value="{{ selected_workflow.id }}" />
 
@@ -180,6 +271,20 @@
         btnText.textContent = 'Running…';
         btnSpinner.classList.remove('hidden');
         submitBtn.setAttribute('disabled', 'true');
+        loadingOverlay.classList.remove('hidden');
+      });
+    }
+
+    // CIC form loading state
+    const cicForm = document.getElementById('cicForm');
+    if (cicForm) {
+      const cicBtnText = document.getElementById('cicBtnText');
+      const cicBtnSpinner = document.getElementById('cicBtnSpinner');
+      const cicSubmitBtn = document.getElementById('cicSubmitBtn');
+      cicForm.addEventListener('submit', () => {
+        if (cicBtnText) cicBtnText.textContent = 'Running…';
+        if (cicBtnSpinner) cicBtnSpinner.classList.remove('hidden');
+        if (cicSubmitBtn) cicSubmitBtn.setAttribute('disabled', 'true');
         loadingOverlay.classList.remove('hidden');
       });
     }

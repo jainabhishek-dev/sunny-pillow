@@ -253,6 +253,89 @@ def fetch_run_findings(run_id: str) -> list[dict]:
     return resp.json()
 
 
+# ── CIC run helpers ───────────────────────────────────────────────────────────
+
+def insert_cic_run(row: dict) -> None:
+    resp = httpx.post(
+        f"{_base_url()}/cic_runs",
+        headers=_headers(),
+        json=row,
+        timeout=15,
+    )
+    resp.raise_for_status()
+
+
+def insert_cic_run_pages(rows: list[dict]) -> None:
+    """Batch-insert all page image records for a CIC run."""
+    resp = httpx.post(
+        f"{_base_url()}/cic_run_pages",
+        headers=_headers(),
+        json=rows,
+        timeout=15,
+    )
+    resp.raise_for_status()
+
+
+def insert_cic_comments(rows: list[dict]) -> None:
+    """Batch-insert all comment verdict records for a CIC run."""
+    resp = httpx.post(
+        f"{_base_url()}/cic_comments",
+        headers=_headers(),
+        json=rows,
+        timeout=15,
+    )
+    resp.raise_for_status()
+
+
+def fetch_cic_runs(workflow_id: str | None = None) -> list[dict]:
+    """Fetch all CIC runs ordered by most recent first, optionally filtered by workflow."""
+    params: dict = {"order": "created_at.desc"}
+    if workflow_id:
+        params["workflow_id"] = f"eq.{workflow_id}"
+    resp = httpx.get(
+        f"{_base_url()}/cic_runs",
+        headers=_headers(),
+        params=params,
+        timeout=10,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def fetch_cic_run(run_id: str) -> dict | None:
+    resp = httpx.get(
+        f"{_base_url()}/cic_runs",
+        headers=_headers(),
+        params={"id": f"eq.{run_id}", "limit": "1"},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    return data[0] if data else None
+
+
+def fetch_cic_run_pages(run_id: str) -> list[dict]:
+    resp = httpx.get(
+        f"{_base_url()}/cic_run_pages",
+        headers=_headers(),
+        params={"run_id": f"eq.{run_id}", "order": "page_num,file_version"},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def fetch_cic_comments(run_id: str) -> list[dict]:
+    resp = httpx.get(
+        f"{_base_url()}/cic_comments",
+        headers=_headers(),
+        params={"run_id": f"eq.{run_id}", "order": "page_resolved.asc.nullslast,id.asc"},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
 def update_finding_review(finding_id: str, review_status: str, review_comment: str) -> None:
     """Overwrite the review verdict and comment on a single finding."""
     resp = httpx.patch(

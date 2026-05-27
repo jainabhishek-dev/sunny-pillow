@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% block title %}{{ run.commented_file_name or "CIC Run" }} — CheckPoint{% endblock %}
+
+{% macro comment_card(c) %}
+<div class="border border-gray-100 rounded-xl p-3 bg-white" id="cic-card-{{ c.id }}">
+  <div class="flex items-center justify-between gap-2 mb-1.5">
+    {% if c.verdict == 'fixed' %}
+    <span class="text-xs px-2 py-0.5 rounded-full font-semibold bg-green-50 text-green-600">Fixed</span>
+    {% elif c.verdict == 'not_fixed' %}
+    <span class="text-xs px-2 py-0.5 rounded-full font-semibold bg-red-50 text-red-600">Not Fixed</span>
+    {% else %}
+    <span class="text-xs px-2 py-0.5 rounded-full font-semibold bg-amber-50 text-amber-600">Not Sure</span>
+    {% endif %}
+    {% if c.author %}
+    <span class="text-xs text-gray-400">{{ c.author }}</span>
+    {% endif %}
+  </div>
+  <p class="text-xs text-gray-700 leading-relaxed">"{{ c.content }}"</p>
+  {% if c.reason %}
+  <p class="text-xs text-gray-400 mt-1 italic">{{ c.reason }}</p>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% block content %}
+
+<div class="mb-6">
+  <a href="/history?tab=cic" class="text-sm text-indigo-600 hover:text-indigo-800 font-medium transition">← Back to History</a>
+</div>
+
+<!-- Run header -->
+<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-6">
+  <div class="flex items-start justify-between gap-4 flex-wrap">
+    <div>
+      <div class="flex items-center gap-2 mb-1">
+        <span class="text-xs px-2 py-0.5 rounded-full bg-purple-50 text-purple-600 font-medium">CIC</span>
+        <span class="text-xs px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600 font-medium">{{ run.workflow_name }}</span>
+      </div>
+      <h2 class="text-xl font-bold text-gray-800">{{ run.commented_file_name or "Untitled" }}</h2>
+      <p class="text-sm text-gray-500 mt-0.5">Revised: {{ run.revised_file_name or "—" }}</p>
+      <div class="flex items-center gap-3 mt-2 flex-wrap text-xs text-gray-400">
+        <span>{{ run.total_pages }} page{{ 's' if run.total_pages != 1 else '' }}</span>
+        <span>{{ run.total_comments }} comment{{ 's' if run.total_comments != 1 else '' }}</span>
+        <span class="text-green-600 font-medium">{{ run.fixed_count }} Fixed</span>
+        <span class="text-red-500 font-medium">{{ run.not_fixed_count }} Not Fixed</span>
+        <span class="text-amber-500 font-medium">{{ run.not_sure_count }} Not Sure</span>
+        <span>Checked by {{ run.checked_by }}</span>
+        <span>{{ run.created_at[:10] if run.created_at else "" }}</span>
+      </div>
+    </div>
+    <div class="flex gap-2 shrink-0">
+      {% if run.commented_drive_url %}
+      <a href="{{ run.commented_drive_url }}" target="_blank" rel="noopener noreferrer"
+        class="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-indigo-600 font-medium transition px-3 py-1.5 rounded-lg border border-gray-200 hover:border-indigo-300">
+        Original ↗
+      </a>
+      {% endif %}
+      {% if run.revised_drive_url %}
+      <a href="{{ run.revised_drive_url }}" target="_blank" rel="noopener noreferrer"
+        class="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-indigo-600 font-medium transition px-3 py-1.5 rounded-lg border border-gray-200 hover:border-indigo-300">
+        Revised ↗
+      </a>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- Page-by-page sections -->
+<div class="space-y-4">
+  {% for page_num in range(1, total_pages + 1) %}
+  {% set page_cmts = page_comments_map.get(page_num, []) %}
+  <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+
+    <!-- Page header -->
+    <div class="px-6 py-3 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
+      <span class="text-sm font-semibold text-gray-700">Page {{ page_num }}</span>
+      {% if page_cmts %}
+      {% set fixed_n = page_cmts | selectattr('verdict', 'equalto', 'fixed') | list | length %}
+      {% set nf_n = page_cmts | selectattr('verdict', 'equalto', 'not_fixed') | list | length %}
+      {% set ns_n = page_cmts | selectattr('verdict', 'equalto', 'not_sure') | list | length %}
+      <div class="flex items-center gap-2">
+        {% if fixed_n %}<span class="text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-600 font-medium">{{ fixed_n }} fixed</span>{% endif %}
+        {% if nf_n %}<span class="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-500 font-medium">{{ nf_n }} not fixed</span>{% endif %}
+        {% if ns_n %}<span class="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-500 font-medium">{{ ns_n }} not sure</span>{% endif %}
+      </div>
+      {% else %}
+      <span class="text-xs text-gray-400">No comments resolved here</span>
+      {% endif %}
+    </div>
+
+    <!-- Three-column layout: original | revised | comments -->
+    <div class="flex gap-0 divide-x divide-gray-100 h-[600px]">
+
+      <!-- Original (file 1) page image -->
+      <div class="w-1/3 p-3 flex items-start justify-center bg-gray-50 overflow-y-auto">
+        {% if f1_image_map.get(page_num) %}
+        <div class="w-full">
+          <p class="text-xs text-gray-400 font-medium mb-2 text-center">Original</p>
+          <img
+            src="https://lh3.googleusercontent.com/d/{{ f1_image_map[page_num] }}"
+            alt="Original page {{ page_num }}"
+            class="w-full rounded border border-gray-200 shadow-sm"
+            loading="lazy"
+          />
+        </div>
+        {% else %}
+        <div class="w-full flex flex-col items-center justify-center py-12 text-gray-400 text-xs gap-2">
+          <span class="font-medium">Original</span>
+          <div class="border border-dashed border-gray-300 rounded w-full py-8 text-center">Image not available</div>
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- Revised (file 2) page image -->
+      <div class="w-1/3 p-3 flex items-start justify-center bg-gray-50 overflow-y-auto">
+        {% if f2_image_map.get(page_num) %}
+        <div class="w-full">
+          <p class="text-xs text-gray-400 font-medium mb-2 text-center">Revised</p>
+          <img
+            src="https://lh3.googleusercontent.com/d/{{ f2_image_map[page_num] }}"
+            alt="Revised page {{ page_num }}"
+            class="w-full rounded border border-gray-200 shadow-sm"
+            loading="lazy"
+          />
+        </div>
+        {% else %}
+        <div class="w-full flex flex-col items-center justify-center py-12 text-gray-400 text-xs gap-2">
+          <span class="font-medium">Revised</span>
+          <div class="border border-dashed border-gray-300 rounded w-full py-8 text-center">Image not available</div>
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- Comments resolved on this page -->
+      <div class="w-1/3 p-4 overflow-y-auto">
+        {% if page_cmts %}
+        <div class="space-y-3">
+          {% for c in page_cmts %}
+          {{ comment_card(c) }}
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="flex items-center justify-center h-full py-12 text-gray-400 text-sm">
+          No comments resolved on this page.
+        </div>
+        {% endif %}
+      </div>
+
+    </div>
+  </div>
+  {% endfor %}
+
+  <!-- Document-level / global pass comments (page_resolved = None) -->
+  {% set global_cmts = page_comments_map.get(None, []) %}
+  {% if global_cmts %}
+  <div class="bg-white rounded-2xl border border-purple-100 shadow-sm overflow-hidden">
+    <div class="px-6 py-3 bg-purple-50 border-b border-purple-100 flex items-center justify-between">
+      <span class="text-sm font-semibold text-purple-700">Full-document check</span>
+      <span class="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-600 font-medium">
+        {{ global_cmts | length }} comment{{ 's' if global_cmts | length != 1 else '' }}
+      </span>
+    </div>
+    <div class="p-4 space-y-3">
+      {% for c in global_cmts %}
+      {{ comment_card(c) }}
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+</div>
+
+{% endblock %}

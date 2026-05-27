@@ -8,11 +8,13 @@
     <h2 class="text-2xl font-bold text-gray-800">Manage Checkpoints</h2>
     <p class="text-gray-500 text-sm mt-1">Edit or delete checkpoints for the selected workflow.</p>
   </div>
+  {% if selected_workflow.get('type') != 'cic' %}
   <button
     onclick="document.getElementById('add-form').classList.toggle('hidden')"
     class="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-5 py-2.5 rounded-xl transition text-sm shadow-sm">
     + Add Checkpoint
   </button>
+  {% endif %}
 </div>
 
 <!-- Workflow selector -->
@@ -41,7 +43,8 @@
 </div>
 {% endif %}
 
-<!-- Add Checkpoint form (hidden by default) -->
+<!-- Add Checkpoint form (hidden by default, never shown for CIC workflows) -->
+{% if selected_workflow.get('type') != 'cic' %}
 <div id="add-form" class="hidden mb-8 bg-white rounded-2xl border border-indigo-200 shadow-sm p-6">
   <h3 class="text-sm font-semibold text-gray-700 mb-4">New Checkpoint</h3>
   <form method="POST" action="/checkpoints/add?workflow={{ selected_workflow.id }}" class="space-y-4">
@@ -102,6 +105,15 @@
 
   </form>
 </div>
+{% endif %}{# end add-form for non-CIC #}
+
+<!-- CIC workflow info message -->
+{% if selected_workflow.get('type') == 'cic' %}
+<div class="bg-gray-50 border border-gray-200 rounded-2xl px-6 py-8 text-center">
+  <p class="text-gray-500 text-sm font-medium">CIC workflows don't use checkpoints</p>
+  <p class="text-gray-400 text-xs mt-1">Comments are extracted live from the commented document during each run.</p>
+</div>
+{% else %}
 
 <!-- Checkpoints grouped by category for selected workflow -->
 {% for category, checkpoints in categories.items() %}
@@ -203,6 +215,8 @@
   </div>
 </div>
 {% endfor %}
+
+{% endif %}{# end of else block for non-CIC workflows #}
 
 <script>
   function toggleEdit(id) {

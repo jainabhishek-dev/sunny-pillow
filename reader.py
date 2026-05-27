@@ -1,3 +1,4 @@
+import json
 import re
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
@@ -156,6 +157,51 @@ def upload_jpeg_to_drive(token: dict, folder_id: str, filename: str, image_bytes
         body={"type": "anyone", "role": "reader"},
     ).execute()
     return file_id
+
+
+def fetch_drive_comments_with_pages(token: dict, file_id: str) -> list[dict]:
+    """Fetch all comments from a Google Drive PDF and map each to its page number.
+
+    Drive API comment anchor format for PDFs:
+      anchor = '{"a": [{"kind": "drive#commentRegion", "page": N}]}'
+
+    Returns list of:
+      {"id", "content", "author", "page_num"}
+      page_num is None for comments with no page anchor (global comments).
+    """
+    creds = _build_credentials(token)
+    drive_service = _build_drive_service(creds)
+    results = []
+    page_token = None
+    while True:
+        resp = drive_service.comments().list(
+            fileId=file_id,
+            fields="comments(id,content,author(displayName),anchor,resolved),nextPageToken",
+            pageSize=100,
+            pageToken=page_token,
+        ).execute()
+        for c in resp.get("comments", []):
+            # Skip resolved comments — they've already been addressed
+            if c.get("resolved"):
+                continue
+            page_num = None
+            try:
+                anchor = json.loads(c.get("anchor") or "{}")
+                regions = anchor.get("a", [])
+                if regions and "page" in regions[0]:
+                    page_num = regions[0]["page"]  # 1-based page number
+            except Exception:
+                pass
+            results.append({
+                "id": c["id"],
+                "content": c.get("content", ""),
+                "author": c.get("author", {}).get("displayName", ""),
+                "page_num": page_num,
+            })
+        page_token = resp.get("nextPageToken")
+        if not page_token:
+            break
+    return results
 
 
 def get_pdf_bytes_by_id(token: dict, file_id: str) -> dict:

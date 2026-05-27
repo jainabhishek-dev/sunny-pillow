@@ -10,13 +10,28 @@
   </div>
 </div>
 
+<!-- Tabs -->
+<div class="flex gap-1 mb-5 bg-gray-100 rounded-xl p-1 w-fit">
+  <a href="/history?tab=review{% if selected_workflow_id %}&workflow={{ selected_workflow_id }}{% endif %}"
+    class="px-4 py-2 rounded-lg text-sm font-medium transition
+      {% if active_tab == 'review' %}bg-white text-gray-800 shadow-sm{% else %}text-gray-500 hover:text-gray-700{% endif %}">
+    Review Runs
+  </a>
+  <a href="/history?tab=cic{% if selected_workflow_id %}&workflow={{ selected_workflow_id }}{% endif %}"
+    class="px-4 py-2 rounded-lg text-sm font-medium transition
+      {% if active_tab == 'cic' %}bg-white text-gray-800 shadow-sm{% else %}text-gray-500 hover:text-gray-700{% endif %}">
+    CIC Runs
+  </a>
+</div>
+
 <!-- Workflow filter -->
 <div class="mb-5 flex items-center gap-3">
   <label class="text-sm font-semibold text-gray-600">Workflow</label>
-  <select onchange="window.location.href='/history' + (this.value ? '?workflow=' + this.value : '')"
+  {% set tab_workflows = cic_workflows if active_tab == 'cic' else review_workflows %}
+  <select onchange="window.location.href='/history?tab={{ active_tab }}' + (this.value ? '&workflow=' + this.value : '')"
     class="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400">
     <option value="" {% if not selected_workflow_id %}selected{% endif %}>All workflows</option>
-    {% for wf in workflows %}
+    {% for wf in tab_workflows %}
     <option value="{{ wf.id }}" {% if wf.id == selected_workflow_id %}selected{% endif %}>{{ wf.name }}</option>
     {% endfor %}
   </select>
@@ -28,6 +43,8 @@
 </div>
 {% endif %}
 
+<!-- ── Review Runs tab ──────────────────────────────────────────────────────── -->
+{% if active_tab == 'review' %}
 {% if runs %}
 <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
   <div class="overflow-x-auto">
@@ -107,11 +124,103 @@
   </table>
   </div>
 </div>
-
 {% else %}
 <div class="bg-white rounded-2xl border border-gray-200 shadow-sm px-6 py-12 text-center">
-  <p class="text-gray-400 text-sm">No runs yet. Run a check to see history here.</p>
+  <p class="text-gray-400 text-sm">No review runs yet. Run a check to see history here.</p>
 </div>
+{% endif %}
+{% endif %}
+
+<!-- ── CIC Runs tab ─────────────────────────────────────────────────────────── -->
+{% if active_tab == 'cic' %}
+{% if cic_runs %}
+<div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+  <div class="overflow-x-auto">
+  <table class="w-full text-sm min-w-[800px]">
+    <thead>
+      <tr class="border-b border-gray-100 bg-gray-50">
+        <th class="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Commented File</th>
+        <th class="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Revised File</th>
+        <th class="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Workflow</th>
+        <th class="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Checked By</th>
+        <th class="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Date</th>
+        <th class="text-center px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Pages</th>
+        <th class="text-center px-6 py-3 text-xs font-semibold text-green-600 uppercase tracking-wide">Fixed</th>
+        <th class="text-center px-6 py-3 text-xs font-semibold text-red-500 uppercase tracking-wide">Not Fixed</th>
+        <th class="text-center px-6 py-3 text-xs font-semibold text-amber-500 uppercase tracking-wide">Not Sure</th>
+        <th class="px-6 py-3"></th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-100">
+      {% for run in cic_runs %}
+      <tr class="hover:bg-gray-50 transition">
+        <td class="px-6 py-4 text-gray-800 font-medium max-w-[180px] truncate">
+          {{ run.commented_file_name or "—" }}
+        </td>
+        <td class="px-6 py-4 text-gray-600 max-w-[180px] truncate">
+          {{ run.revised_file_name or "—" }}
+        </td>
+        <td class="px-6 py-4 text-gray-500 text-xs">{{ run.workflow_name }}</td>
+        <td class="px-6 py-4 text-gray-500 text-xs">{{ run.checked_by }}</td>
+        <td class="px-6 py-4 text-gray-400 text-xs whitespace-nowrap">
+          {% if run.created_at %}
+            {{ run.created_at[:10] }}<br>
+            <span class="text-gray-300">
+              {% set h = run.created_at[11:13] | int %}
+              {% set m = run.created_at[14:16] %}
+              {% if h == 0 %}12:{{ m }} AM
+              {% elif h < 12 %}{{ h }}:{{ m }} AM
+              {% elif h == 12 %}12:{{ m }} PM
+              {% else %}{{ h - 12 }}:{{ m }} PM
+              {% endif %}
+            </span>
+          {% else %}—{% endif %}
+        </td>
+        <td class="px-6 py-4 text-center text-gray-500">{{ run.total_pages }}</td>
+        <td class="px-6 py-4 text-center">
+          {% if run.fixed_count > 0 %}
+          <span class="inline-block px-2 py-0.5 rounded-full bg-green-50 text-green-600 text-xs font-semibold">
+            {{ run.fixed_count }}
+          </span>
+          {% else %}
+          <span class="text-gray-400 text-xs">—</span>
+          {% endif %}
+        </td>
+        <td class="px-6 py-4 text-center">
+          {% if run.not_fixed_count > 0 %}
+          <span class="inline-block px-2 py-0.5 rounded-full bg-red-50 text-red-600 text-xs font-semibold">
+            {{ run.not_fixed_count }}
+          </span>
+          {% else %}
+          <span class="text-gray-400 text-xs">—</span>
+          {% endif %}
+        </td>
+        <td class="px-6 py-4 text-center">
+          {% if run.not_sure_count > 0 %}
+          <span class="inline-block px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 text-xs font-semibold">
+            {{ run.not_sure_count }}
+          </span>
+          {% else %}
+          <span class="text-gray-400 text-xs">—</span>
+          {% endif %}
+        </td>
+        <td class="px-6 py-4 text-right">
+          <a href="/history/cic/{{ run.id }}"
+            class="text-xs text-purple-600 hover:text-purple-800 font-medium transition px-3 py-1.5 rounded-lg border border-purple-200 hover:bg-purple-50">
+            View
+          </a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% else %}
+<div class="bg-white rounded-2xl border border-gray-200 shadow-sm px-6 py-12 text-center">
+  <p class="text-gray-400 text-sm">No CIC runs yet. Select a CIC workflow from the home page to get started.</p>
+</div>
+{% endif %}
 {% endif %}
 
 {% endblock %}
