@@ -27,6 +27,10 @@ oauth.register(
 
 async def login(request: Request) -> RedirectResponse:
     redirect_uri = str(request.url_for("auth_callback"))
+    # Render terminates TLS at its proxy — the app sees http:// internally.
+    # Force https:// so the redirect_uri matches Google's registered URI.
+    if os.getenv("ENV") == "production" and redirect_uri.startswith("http://"):
+        redirect_uri = "https://" + redirect_uri[7:]
     return await oauth.google.authorize_redirect(request, redirect_uri)
 
 
@@ -35,14 +39,9 @@ async def auth_callback(request: Request) -> RedirectResponse:
         token = await oauth.google.authorize_access_token(request)
     except Exception as exc:
         error_str = str(exc)
-        # Stale session state (common after redeployments or cookie changes).
-        # Clear the session and send the user back to login — they just click once more.
-        if "mismatching_state" in error_str or "CSRF" in error_str:
-            request.session.clear()
-            frontend_url = os.getenv("FRONTEND_URL", "")
-            login_page = f"{frontend_url}/login" if frontend_url else "/login"
-            return RedirectResponse(url=login_page)
-        return RedirectResponse(url=f"/?error=Authentication+failed:+{error_str[:80]}")
+        # Surface the error clearly so it can be diagnosed.
+        request.session.clear()
+        return RedirectResponse(url=f"/?error=Authentication+failed:+{error_str[:120]}")
 
     user_info = token.get("userinfo") or {}
     request.session["token"] = dict(token)
