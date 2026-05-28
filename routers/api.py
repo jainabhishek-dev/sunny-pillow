@@ -1,0 +1,575 @@
+"""JSON API router — all /api/* endpoints consumed by the React SPA.
+
+Every endpoint returns JSON. Auth is enforced via the shared session cookie
+(set by /login/google → /auth/callback on the HTML side).
+"""
+
+import asyncio
+import json
+import uuid
+from functools import partial
+from typing import Annotated
+
+from fastapi import APIRouter, Body, Form, HTTPException
+from fastapi.responses import JSONResponse
+from starlette.requests import Request
+
+import auth
+import db
+import state
+from utils import (
+    ctx, ensure_job_dir, filter_by_workflow, group_by_category,
+    load_job, next_checkpoint_id, save_job, slugify, to_ist,
+    cascade_delete_workflow,
+)
+from services.drive_service import get_file_as_pdf, fetch_drive_comments_with_pages
+
+router = APIRouter()
+
+
+# ── Helpers ────────────────────────────────────────────────────────────────────
+
+def _require_user(request: Request) -> dict:
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return user
+
+
+def _require_token(request: Request) -> dict:
+    token = auth.get_token(request)
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return token
+
+
+def _require_admin(request: Request) -> dict:
+    user = _require_user(request)
+    if not state.is_admin(user):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user
+
+
+def _require_super_admin(request: Request) -> dict:
+    user = _require_user(request)
+    if not state.is_super_admin(user):
+        raise HTTPException(status_code=403, detail="Super admin access required")
+    return user
+
+
+# ── Auth ───────────────────────────────────────────────────────────────────────
+
+@router.get("/auth/me")
+async def get_me(request: Request):
+    """Return the current user's profile and role flags, or 401."""
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return {
+        "user": user,
+        "is_admin": state.is_admin(user),
+        "is_super_admin": state.is_super_admin(user),
+    }
+
+
+# ── Workflows & checkpoints ────────────────────────────────────────────────────
+
+@router.get("/workflows")
+async def get_workflows(request: Request):
+    _require_user(request)
+    return {
+        "workflows": state.WORKFLOWS,
+        "review_workflows": [w for w in state.WORKFLOWS if w.get("type", "review") == "review"],
+        "cic_workflows": [w for w in state.WORKFLOWS if w.get("type") == "cic"],
+    }
+
+
+@router.get("/checkpoints")
+async def get_checkpoints(request: Request, workflow_id: str = ""):
+    _require_user(request)
+    if workflow_id:
+        filtered = filter_by_workflow(state.CHECKPOINTS, workflow_id)
+    else:
+        filtered = state.CHECKPOINTS
+    return {
+        "checkpoints": filtered,
+        "categories": group_by_category(filtered),
+    }
+
+
+# ── Review job ─────────────────────────────────────────────────────────────────
+
+@router.post("/check")
+async def api_run_check(request: Request, body: dict = Body(...)):
+    """Validate input and create a review job. Returns {job_id}."""
+    user = _require_user(request)
+    token = _require_token(request)
+
+    drive_url = (body.get("drive_url") or "").strip()
+    workflow_id = (body.get("workflow_id") or "").strip()
+    checkpoint_ids: list[str] = body.get("checkpoint_ids") or []
+
+    if not workflow_id or workflow_id not in [w["id"] for w in state.WORKFLOWS]:
+        raise HTTPException(status_code=400, detail="Please select a valid workflow.")
+    if not checkpoint_ids:
+        raise HTTPException(status_code=400, detail="Please select at least one checkpoint.")
+    if not drive_url:
+        raise HTTPException(status_code=400, detail="Please enter a Google Drive file URL.")
+
+    selected_checkpoints = [
+        state.CHECKPOINT_MAP[cid] for cid in checkpoint_ids if cid in state.CHECKPOINT_MAP
+    ]
+
+    loop = asyncio.get_running_loop()
+    try:
+        file_data = await loop.run_in_executor(
+            None, partial(get_file_as_pdf, token, drive_url)
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        err = str(exc)
+        if "invalid_grant" in err or "Token has been expired" in err:
+            raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
+        raise HTTPException(status_code=400, detail=f"Could not read the file: {err}")
+
+    job_id = uuid.uuid4().hex
+    save_job(job_id, {
+        "drive_url": drive_url,
+        "checked_by": user["email"],
+        "file_id": file_data["file_id"],
+        "file_type": file_data["file_type"],
+        "title": file_data["title"],
+        "workflow_id": workflow_id,
+        "checkpoint_ids": [cp["id"] for cp in selected_checkpoints],
+        "status": "processing",
+    })
+    return {"job_id": job_id, "title": file_data["title"]}
+
+
+@router.post("/retry-check/{job_id}")
+async def api_retry_check(request: Request, job_id: str):
+    _require_user(request)
+    job = load_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    retry_from = job.get("last_successful_page", 0) + 1
+    return {"job_id": job_id, "retry_from": retry_from}
+
+
+@router.post("/insert-comments/{job_id}")
+async def api_insert_comments(request: Request, job_id: str, body: dict = Body(...)):
+    """Post selected findings as Drive comments. Body: {finding_ids: [int, ...]}"""
+    _require_user(request)
+    token = _require_token(request)
+
+    from services.drive_service import post_selected_comments
+
+    job = load_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    job_dir = state._JOBS_DIR / job_id
+    findings_file = job_dir / "findings.json"
+    if not findings_file.exists():
+        raise HTTPException(status_code=404, detail="Findings not found")
+
+    all_findings = json.loads(findings_file.read_text(encoding="utf-8"))
+    finding_ids = [int(fid) for fid in (body.get("finding_ids") or []) if str(fid).isdigit()]
+    selected = [f for f in all_findings if f.get("id") in finding_ids]
+
+    file_data = {"file_id": job["file_id"], "file_type": job["file_type"], "title": job["title"]}
+    loop = asyncio.get_running_loop()
+    try:
+        posted = await loop.run_in_executor(
+            None, partial(post_selected_comments, token, file_data, selected, state.CHECKPOINT_MAP)
+        )
+        return {"posted": posted, "total_selected": len(selected)}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ── CIC job ────────────────────────────────────────────────────────────────────
+
+@router.post("/cic-check")
+async def api_run_cic_check(request: Request, body: dict = Body(...)):
+    """Validate CIC inputs, fetch comments, create job. Returns {job_id}."""
+    user = _require_user(request)
+    token = _require_token(request)
+
+    workflow_id = (body.get("workflow_id") or "").strip()
+    commented_url = (body.get("commented_url") or "").strip()
+    revised_url = (body.get("revised_url") or "").strip()
+
+    workflow = next((w for w in state.WORKFLOWS if w["id"] == workflow_id), None)
+    if not workflow or workflow.get("type") != "cic":
+        raise HTTPException(status_code=400, detail="Invalid CIC workflow.")
+    if not commented_url or not revised_url:
+        raise HTTPException(status_code=400, detail="Both file URLs are required.")
+
+    loop = asyncio.get_running_loop()
+
+    try:
+        f1_data = await loop.run_in_executor(None, partial(get_file_as_pdf, token, commented_url))
+    except Exception as exc:
+        err = str(exc)
+        if "invalid_grant" in err or "Token has been expired" in err:
+            raise HTTPException(status_code=401, detail="Session expired.")
+        raise HTTPException(status_code=400, detail=f"Commented file error: {err}")
+
+    try:
+        f2_data = await loop.run_in_executor(None, partial(get_file_as_pdf, token, revised_url))
+    except Exception as exc:
+        err = str(exc)
+        if "invalid_grant" in err or "Token has been expired" in err:
+            raise HTTPException(status_code=401, detail="Session expired.")
+        raise HTTPException(status_code=400, detail=f"Revised file error: {err}")
+
+    if f1_data["file_type"] != "pdf":
+        raise HTTPException(status_code=400, detail="Commented file must be a PDF.")
+    if f2_data["file_type"] != "pdf":
+        raise HTTPException(status_code=400, detail="Revised file must be a PDF.")
+
+    try:
+        comments = await loop.run_in_executor(
+            None, partial(fetch_drive_comments_with_pages, token, f1_data["file_id"])
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not fetch comments: {exc}")
+
+    if not comments:
+        raise HTTPException(status_code=400, detail="No unresolved comments found on the commented file.")
+
+    job_id = uuid.uuid4().hex
+    save_job(job_id, {
+        "job_type": "cic",
+        "workflow_id": workflow_id,
+        "workflow_name": workflow["name"],
+        "checked_by": user["email"],
+        "commented_file_id": f1_data["file_id"],
+        "commented_file_title": f1_data["title"],
+        "commented_drive_url": commented_url,
+        "revised_file_id": f2_data["file_id"],
+        "revised_file_title": f2_data["title"],
+        "revised_drive_url": revised_url,
+        "comments": comments,
+        "status": "processing",
+    })
+    return {
+        "job_id": job_id,
+        "commented_title": f1_data["title"],
+        "revised_title": f2_data["title"],
+        "total_comments": len(comments),
+    }
+
+
+# ── History ────────────────────────────────────────────────────────────────────
+
+@router.get("/history")
+async def api_get_history(request: Request, tab: str = "review", workflow: str = ""):
+    _require_user(request)
+    workflow_id = workflow or None
+    if tab == "cic":
+        cic_runs = db.fetch_cic_runs(workflow_id=workflow_id)
+        for r in cic_runs:
+            r["created_at"] = to_ist(r.get("created_at"))
+        return {
+            "runs": [],
+            "cic_runs": cic_runs,
+            "active_tab": "cic",
+            "review_workflows": [w for w in state.WORKFLOWS if w.get("type", "review") == "review"],
+            "cic_workflows": [w for w in state.WORKFLOWS if w.get("type") == "cic"],
+        }
+    else:
+        runs = db.fetch_runs(workflow_id=workflow_id)
+        for r in runs:
+            r["created_at"] = to_ist(r.get("created_at"))
+        return {
+            "runs": runs,
+            "cic_runs": [],
+            "active_tab": "review",
+            "review_workflows": [w for w in state.WORKFLOWS if w.get("type", "review") == "review"],
+            "cic_workflows": [w for w in state.WORKFLOWS if w.get("type") == "cic"],
+        }
+
+
+@router.get("/history/cic/{run_id}")
+async def api_get_cic_run(request: Request, run_id: str):
+    _require_user(request)
+    run = db.fetch_cic_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="CIC run not found")
+    run["created_at"] = to_ist(run.get("created_at"))
+
+    pages = db.fetch_cic_run_pages(run_id)
+    comments = db.fetch_cic_comments(run_id)
+
+    f1_image_map: dict[int, str] = {}
+    f2_image_map: dict[int, str] = {}
+    for p in pages:
+        if p["file_version"] == "commented":
+            f1_image_map[p["page_num"]] = p["drive_file_id"]
+        else:
+            f2_image_map[p["page_num"]] = p["drive_file_id"]
+
+    page_comments_map: dict[str, list] = {}
+    global_comments = []
+    for c in comments:
+        pr = c.get("page_resolved")
+        if pr is not None:
+            page_comments_map.setdefault(str(pr), []).append(c)
+        else:
+            global_comments.append(c)
+
+    return {
+        "run": run,
+        "total_pages": run.get("total_pages", 0),
+        "f1_image_map": {str(k): v for k, v in f1_image_map.items()},
+        "f2_image_map": {str(k): v for k, v in f2_image_map.items()},
+        "page_comments_map": page_comments_map,
+        "global_comments": global_comments,
+        "needs_images": len(f1_image_map) < run.get("total_pages", 0) or len(f2_image_map) < run.get("total_pages", 0),
+    }
+
+
+@router.get("/history/cic/{run_id}/pages")
+async def api_get_cic_run_pages(request: Request, run_id: str):
+    _require_user(request)
+    pages = db.fetch_cic_run_pages(run_id)
+    return {"pages": pages}
+
+
+@router.get("/history/{run_id}")
+async def api_get_run(request: Request, run_id: str):
+    _require_user(request)
+    run = db.fetch_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    run["created_at"] = to_ist(run.get("created_at"))
+
+    pages = db.fetch_run_pages(run_id)
+    findings = db.fetch_run_findings(run_id)
+
+    page_findings: dict[str, list] = {}
+    doc_findings: list = []
+    for f in findings:
+        if f["page_num"] is None:
+            doc_findings.append(f)
+        else:
+            page_findings.setdefault(str(f["page_num"]), []).append(f)
+
+    checkpoint_map = {cp["id"]: cp["category"] for cp in state.CHECKPOINTS}
+    page_image_map = {str(p["page_num"]): p["drive_file_id"] for p in pages}
+
+    return {
+        "run": run,
+        "page_findings": page_findings,
+        "doc_findings": doc_findings,
+        "checkpoint_map": checkpoint_map,
+        "page_image_map": page_image_map,
+        "total_pages": run["total_pages"],
+    }
+
+
+@router.post("/findings/{finding_id}/review")
+async def api_update_finding_review(request: Request, finding_id: str, body: dict = Body(...)):
+    _require_user(request)
+    review_status = (body.get("review_status") or "").strip()
+    review_comment = (body.get("review_comment") or "").strip()
+    if review_status not in ("valid", "invalid"):
+        raise HTTPException(status_code=400, detail="review_status must be 'valid' or 'invalid'")
+    if not review_comment:
+        raise HTTPException(status_code=400, detail="review_comment is required")
+    try:
+        db.update_finding_review(finding_id, review_status, review_comment)
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Admin — workflows ──────────────────────────────────────────────────────────
+
+@router.get("/admin/workflows")
+async def api_admin_get_workflows(request: Request):
+    _require_admin(request)
+    checkpoint_counts: dict[str, int] = {}
+    for cp in state.CHECKPOINTS:
+        for wf_id in cp.get("workflows", []):
+            checkpoint_counts[wf_id] = checkpoint_counts.get(wf_id, 0) + 1
+    return {"workflows": state.WORKFLOWS, "checkpoint_counts": checkpoint_counts}
+
+
+@router.post("/admin/workflows/add")
+async def api_admin_add_workflow(request: Request, body: dict = Body(...)):
+    user = _require_admin(request)
+    name = (body.get("name") or "").strip()
+    description = (body.get("description") or "").strip()
+    ai_notes = (body.get("ai_notes") or "").strip()
+    action = body.get("action", "manual")
+    wf_type = body.get("type", "review")
+
+    if not name:
+        raise HTTPException(status_code=400, detail="Workflow name is required.")
+
+    wf_id = slugify(name)
+    if not wf_id:
+        raise HTTPException(status_code=400, detail="Could not generate a valid ID from that name.")
+    if any(w["id"] == wf_id for w in state.WORKFLOWS):
+        raise HTTPException(status_code=409, detail=f'A workflow with id "{wf_id}" already exists.')
+
+    sort_order = max((w.get("sort_order", 0) for w in state.WORKFLOWS), default=0) + 1
+
+    if action == "generate":
+        if not ai_notes:
+            raise HTTPException(status_code=400, detail="AI notes are required for AI generation.")
+        from services.workflow_gen import generate_workflow_content
+        loop = asyncio.get_running_loop()
+        try:
+            result = await loop.run_in_executor(None, partial(generate_workflow_content, name, ai_notes))
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc))
+
+        db.insert_workflow({"id": wf_id, "name": name, "description": description,
+                            "sort_order": sort_order, "created_by": user["email"],
+                            "type": wf_type if wf_type in ("review", "cic") else "review"})
+
+        existing_nums = [
+            int(cp["id"].split("_")[1])
+            for cp in state.CHECKPOINTS
+            if cp["id"].startswith("cp_") and cp["id"].split("_")[1].isdigit()
+        ]
+        next_num = max(existing_nums, default=0) + 1
+        next_sort = max((cp.get("sort_order", 0) for cp in state.CHECKPOINTS), default=0) + 1
+        for cp_data in result.get("checkpoints", []):
+            try:
+                db.insert_checkpoint({"id": f"cp_{next_num:03d}", "category": cp_data["category"].strip(),
+                                      "instructions": cp_data["instructions"].strip(),
+                                      "type": cp_data["type"], "scope": cp_data["scope"],
+                                      "workflows": [wf_id], "sort_order": next_sort})
+                next_num += 1
+                next_sort += 1
+            except Exception:
+                pass
+        state.reload_checkpoints()
+        state.reload_workflows()
+        return {"ok": True, "workflow_id": wf_id, "checkpoint_count": len(result.get("checkpoints", []))}
+
+    db.insert_workflow({"id": wf_id, "name": name, "description": description,
+                        "sort_order": sort_order, "created_by": user["email"],
+                        "type": wf_type if wf_type in ("review", "cic") else "review"})
+    state.reload_workflows()
+    return {"ok": True, "workflow_id": wf_id}
+
+
+@router.post("/admin/workflows/{wf_id}/edit")
+async def api_admin_edit_workflow(request: Request, wf_id: str, body: dict = Body(...)):
+    _require_admin(request)
+    name = (body.get("name") or "").strip()
+    description = (body.get("description") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Workflow name is required.")
+    try:
+        db.update_workflow(wf_id, {"name": name, "description": description})
+        state.reload_workflows()
+        return {"ok": True}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/admin/workflows/{wf_id}/delete")
+async def api_admin_delete_workflow(request: Request, wf_id: str):
+    user = _require_admin(request)
+    workflow = next((w for w in state.WORKFLOWS if w["id"] == wf_id), None)
+    if not workflow:
+        raise HTTPException(status_code=404, detail="Workflow not found.")
+    if not state.is_super_admin(user) and workflow.get("created_by") != user.get("email"):
+        raise HTTPException(status_code=403, detail="Only the super admin or workflow creator can delete this.")
+    try:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, partial(cascade_delete_workflow, wf_id))
+        return {"ok": True}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ── Admin — checkpoints ────────────────────────────────────────────────────────
+
+@router.post("/admin/checkpoints/add")
+async def api_admin_add_checkpoint(request: Request, body: dict = Body(...)):
+    _require_admin(request)
+    new_id = next_checkpoint_id()
+    sort_order = max((cp["sort_order"] for cp in state.CHECKPOINTS), default=0) + 1
+    try:
+        db.insert_checkpoint({
+            "id": new_id,
+            "category": (body.get("category") or "").strip(),
+            "instructions": (body.get("instructions") or "").strip(),
+            "type": body.get("type", "rule"),
+            "scope": body.get("scope", "page"),
+            "workflows": body.get("workflows") or [],
+            "sort_order": sort_order,
+        })
+        state.reload_checkpoints()
+        return {"ok": True, "checkpoint_id": new_id}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/admin/checkpoints/{cp_id}/edit")
+async def api_admin_edit_checkpoint(request: Request, cp_id: str, body: dict = Body(...)):
+    _require_admin(request)
+    try:
+        db.update_checkpoint(cp_id, {
+            "instructions": (body.get("instructions") or "").strip(),
+            "type": body.get("type", "rule"),
+            "scope": body.get("scope", "page"),
+            "workflows": body.get("workflows") or [],
+        })
+        state.reload_checkpoints()
+        return {"ok": True}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/admin/checkpoints/{cp_id}/delete")
+async def api_admin_delete_checkpoint(request: Request, cp_id: str):
+    _require_admin(request)
+    try:
+        db.delete_checkpoint(cp_id)
+        state.reload_checkpoints()
+        return {"ok": True}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ── Admin — admins ─────────────────────────────────────────────────────────────
+
+@router.get("/admin/admins")
+async def api_admin_get_admins(request: Request):
+    _require_admin(request)
+    return {"admins": db.fetch_all_admins()}
+
+
+@router.post("/admin/admins/add")
+async def api_admin_add_admin(request: Request, body: dict = Body(...)):
+    user = _require_admin(request)
+    email = (body.get("email") or "").strip().lower()
+    if not email:
+        raise HTTPException(status_code=400, detail="Email is required.")
+    try:
+        db.insert_admin({"email": email, "added_by": user["email"]})
+        state.reload_admins()
+        return {"ok": True}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/admin/admins/{email}/delete")
+async def api_admin_delete_admin(request: Request, email: str):
+    _require_super_admin(request)
+    try:
+        db.delete_admin(email)
+        state.reload_admins()
+        return {"ok": True}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))

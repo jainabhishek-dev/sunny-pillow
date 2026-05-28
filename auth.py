@@ -43,7 +43,11 @@ async def auth_callback(request: Request) -> RedirectResponse:
         "name": user_info.get("name", ""),
         "picture": user_info.get("picture", ""),
     }
-    return RedirectResponse(url="/")
+    # If the React SPA frontend is deployed, redirect there after login.
+    # Falls back to the Jinja2 dashboard for local / Render-only setups.
+    frontend_url = os.getenv("FRONTEND_URL", "")
+    redirect_to = f"{frontend_url}/" if frontend_url else "/"
+    return RedirectResponse(url=redirect_to)
 
 
 def logout(request: Request) -> RedirectResponse:
