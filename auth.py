@@ -34,7 +34,15 @@ async def auth_callback(request: Request) -> RedirectResponse:
     try:
         token = await oauth.google.authorize_access_token(request)
     except Exception as exc:
-        return RedirectResponse(url=f"/?error=Authentication+failed:+{str(exc)[:80]}")
+        error_str = str(exc)
+        # Stale session state (common after redeployments or cookie changes).
+        # Clear the session and send the user back to login — they just click once more.
+        if "mismatching_state" in error_str or "CSRF" in error_str:
+            request.session.clear()
+            frontend_url = os.getenv("FRONTEND_URL", "")
+            login_page = f"{frontend_url}/login" if frontend_url else "/login"
+            return RedirectResponse(url=login_page)
+        return RedirectResponse(url=f"/?error=Authentication+failed:+{error_str[:80]}")
 
     user_info = token.get("userinfo") or {}
     request.session["token"] = dict(token)
