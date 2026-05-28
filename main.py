@@ -33,14 +33,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Session cookie — SameSite=None + Secure required for cross-origin cookies in production.
+# Session cookie — SameSite=Lax is required for the OAuth callback to work.
+# (Google redirects back to Render as a top-level navigation, which Lax allows.)
 app.add_middleware(
     SessionMiddleware,
     secret_key=os.getenv("SECRET_KEY", ""),
     session_cookie="checkpoint_session",
     max_age=3600,
     https_only=_is_prod,
-    same_site="none" if _is_prod else "lax",
+    same_site="lax",
 )
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
