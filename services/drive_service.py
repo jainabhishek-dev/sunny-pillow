@@ -328,3 +328,11 @@ def post_selected_comments(token: dict, file_data: dict, findings: list[dict], c
             posted += 1
 
     return posted
+
+
+def download_drive_image(token: dict, file_id: str) -> bytes:
+    """Download a Drive file (JPEG page image) as raw bytes using the user's token."""
+    creds = _build_credentials(token)
+    drive_service = _build_drive_service(creds)
+    request = drive_service.files().get_media(fileId=file_id)
+    return request.execute()

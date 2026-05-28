@@ -11,7 +11,7 @@ from functools import partial
 from typing import Annotated
 
 from fastapi import APIRouter, Body, Form, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from starlette.requests import Request
 
 import auth
@@ -22,7 +22,7 @@ from utils import (
     load_job, next_checkpoint_id, save_job, slugify, to_ist,
     cascade_delete_workflow,
 )
-from services.drive_service import get_file_as_pdf, fetch_drive_comments_with_pages
+from services.drive_service import get_file_as_pdf, fetch_drive_comments_with_pages, download_drive_image
 
 router = APIRouter()
 
@@ -70,6 +70,31 @@ async def get_me(request: Request):
         "is_admin": state.is_admin(user),
         "is_super_admin": state.is_super_admin(user),
     }
+
+
+# ── Drive image proxy ─────────────────────────────────────────────────────────
+
+@router.get("/drive-image/{file_id}")
+async def proxy_drive_image(request: Request, file_id: str):
+    """Proxy a Drive JPEG (page image) back to the browser at full resolution.
+
+    <img> tags cannot send OAuth tokens, so the frontend uses this endpoint
+    instead of hitting Drive directly. The user's session token is used to
+    download the file and the raw bytes are returned with image/jpeg content-type.
+    """
+    token = auth.get_token(request)
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    loop = asyncio.get_running_loop()
+    try:
+        img_bytes = await loop.run_in_executor(
+            None, lambda: download_drive_image(token, file_id)
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Drive fetch failed: {e}")
+    return Response(content=img_bytes, media_type="image/jpeg", headers={
+        "Cache-Control": "private, max-age=3600",
+    })
 
 
 # ── Workflows & checkpoints ────────────────────────────────────────────────────
