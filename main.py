@@ -33,15 +33,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Session cookie — SameSite=Lax is required for the OAuth callback to work.
-# (Google redirects back to Render as a top-level navigation, which Lax allows.)
+# Session cookie.
+# SameSite=None is required so the Vercel SPA can send the cookie to the
+# Render backend on cross-origin API calls (fetch with withCredentials).
+# SameSite=None requires Secure=True, which is fine because Render is HTTPS.
+# The OAuth redirect_uri CSRF issue is fixed separately in auth.py (forcing
+# https:// on redirect_uri so it matches Google's registered URI).
 app.add_middleware(
     SessionMiddleware,
     secret_key=os.getenv("SECRET_KEY", ""),
     session_cookie="checkpoint_session",
     max_age=3600,
     https_only=_is_prod,
-    same_site="lax",
+    same_site="none" if _is_prod else "lax",
 )
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
