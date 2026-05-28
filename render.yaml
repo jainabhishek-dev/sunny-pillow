@@ -23,3 +23,5 @@ services:
         sync: false
       - key: SECRET_KEY
         sync: false
+      - key: FRONTEND_URL
+        value: "https://checkpoint-frontend-jet.vercel.app"
