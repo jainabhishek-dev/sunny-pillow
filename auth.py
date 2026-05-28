@@ -59,7 +59,8 @@ async def auth_callback(request: Request) -> RedirectResponse:
 
 def logout(request: Request) -> RedirectResponse:
     request.session.clear()
-    return RedirectResponse(url="/login")
+    frontend_url = os.getenv("FRONTEND_URL", "")
+    return RedirectResponse(url=f"{frontend_url}/login" if frontend_url else "/login")
 
 
 def get_current_user(request: Request) -> dict | None:
