@@ -340,9 +340,9 @@ async def api_get_cic_run(request: Request, run_id: str):
     page_comments_map: dict[str, list] = {}
     global_comments = []
     for c in comments:
-        pr = c.get("page_resolved")
-        if pr is not None:
-            page_comments_map.setdefault(str(pr), []).append(c)
+        op = c.get("original_page")
+        if op is not None:
+            page_comments_map.setdefault(str(op), []).append(c)
         else:
             global_comments.append(c)
 

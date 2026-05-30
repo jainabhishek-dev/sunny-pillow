@@ -58,6 +58,7 @@ async def _stream_cic_processing(job_id: str, token: dict):
                 "verdict": "not_sure",
                 "reason": "",
                 "page_resolved": None,
+                "original_page": None,
             }
 
         # Load both PDFs
@@ -114,6 +115,11 @@ async def _stream_cic_processing(job_id: str, token: dict):
                 page_comments_map.setdefault(pn, []).append(c)
             else:
                 global_comments.append(c)
+
+        # Record original_page for every comment that was mapped to a specific page
+        for pn, pcomments in page_comments_map.items():
+            for c in pcomments:
+                comment_tracker[c["id"]]["original_page"] = pn
 
         try:
             f1_doc = fitz.open(stream=BytesIO(f1_bytes), filetype="pdf")
@@ -211,6 +217,7 @@ async def _stream_cic_processing(job_id: str, token: dict):
                             "content": c["content"],
                             "verdict": ai_result["verdict"],
                             "reason": ai_result["reason"],
+                            "original_page": comment_tracker[cid]["original_page"],
                         })
             except Exception as e:
                 yield f"event: error\ndata: {json.dumps({'message': f'Global check failed: {str(e)}'})}\n\n"

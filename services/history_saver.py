@@ -169,6 +169,7 @@ async def save_cic_run_to_history(
                     "verdict": info["verdict"],
                     "reason": info.get("reason", ""),
                     "page_resolved": info.get("page_resolved"),
+                    "original_page": info.get("original_page"),
                 }
                 for cid, info in comment_tracker.items()
             ]
