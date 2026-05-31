@@ -120,7 +120,8 @@ async def _stream_processing(job_id: str, token: dict, retry_from: int = None):
                 yield f"event: page_ready\ndata: {json.dumps({'page': page_num, 'total_pages': total_pages})}\n\n"
 
                 findings = await loop.run_in_executor(
-                    None, partial(run_vision_check, img_bytes, selected_checkpoints, page_num, workflow_name)
+                    None, partial(run_vision_check, img_bytes, selected_checkpoints, page_num, workflow_name,
+                                  job.get("page_prompt") or None)
                 )
 
                 for finding in findings:
@@ -176,11 +177,12 @@ async def _stream_processing(job_id: str, token: dict, retry_from: int = None):
         # ── Document-level check ──────────────────────────────────────────────
         doc_checkpoints = [cp for cp in selected_checkpoints if cp.get("scope") == "document"]
 
-        if doc_checkpoints:
+        if doc_checkpoints or job.get("doc_prompt"):
             yield f"event: document_start\ndata: {json.dumps({})}\n\n"
             try:
                 doc_findings = await loop.run_in_executor(
-                    None, partial(run_document_check, pdf_bytes, doc_checkpoints)
+                    None, partial(run_document_check, pdf_bytes, doc_checkpoints,
+                                  job.get("doc_prompt") or None)
                 )
 
                 for finding in doc_findings:

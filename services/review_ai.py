@@ -250,11 +250,51 @@ def _run_anthropic_document(pdf_bytes: bytes, prompt: str, config: dict) -> list
 
 # ── Public API ─────────────────────────────────────────────────────────────────
 
-def run_vision_check(image_bytes: bytes, checkpoints: list[dict], page_num: int, workflow_name: str) -> list[dict]:
+def run_vision_check(
+    image_bytes: bytes,
+    checkpoints: list[dict],
+    page_num: int,
+    workflow_name: str,
+    custom_prompt: str | None = None,
+) -> list[dict]:
     """First-pass vision check on a single page image. Returns findings list."""
     config = load_model_config()
     provider = config.get("provider", "gemini")
-    if provider == "gemini":
+    if custom_prompt:
+        # Substitute page_num placeholder if present, then use as the full prompt
+        resolved_prompt = custom_prompt.replace("{page_num}", str(page_num))
+        if provider == "gemini":
+            import google.generativeai as genai
+            from PIL import Image
+            api_key = os.getenv(config["api_key_env"])
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel(
+                model_name=config["model"],
+                generation_config=genai.types.GenerationConfig(
+                    temperature=config["temperature"],
+                    max_output_tokens=config["max_tokens"],
+                ),
+            )
+            image = Image.open(BytesIO(image_bytes))
+            response = model.generate_content([resolved_prompt, image])
+            findings = parse_response(response.text)
+        elif provider == "anthropic":
+            import anthropic, base64
+            api_key = os.getenv(config["api_key_env"])
+            ac = anthropic.Anthropic(api_key=api_key)
+            image_data = base64.standard_b64encode(image_bytes).decode("utf-8")
+            message = ac.messages.create(
+                model=config["model"],
+                max_tokens=config["max_tokens"],
+                messages=[{"role": "user", "content": [
+                    {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": image_data}},
+                    {"type": "text", "text": resolved_prompt},
+                ]}],
+            )
+            findings = parse_response(message.content[0].text)
+        else:
+            findings = []
+    elif provider == "gemini":
         findings = _run_gemini_vision(image_bytes, checkpoints, page_num, config, workflow_name)
     elif provider == "anthropic":
         findings = _run_anthropic_vision(image_bytes, checkpoints, page_num, config, workflow_name)
@@ -281,13 +321,13 @@ def run_vision_review(image_bytes: bytes, findings: list[dict], page_num: int) -
     return [r for r in reviews if isinstance(r, dict) and required.issubset(r.keys())]
 
 
-def run_document_check(pdf_bytes: bytes, checkpoints: list[dict]) -> list[dict]:
+def run_document_check(pdf_bytes: bytes, checkpoints: list[dict], custom_prompt: str | None = None) -> list[dict]:
     """Document-level check: sends the full PDF with document-scope checkpoints."""
-    if not checkpoints:
+    if not checkpoints and not custom_prompt:
         return []
     config = load_model_config()
     provider = config.get("provider", "gemini")
-    prompt = _build_document_prompt(checkpoints)
+    prompt = custom_prompt if custom_prompt else _build_document_prompt(checkpoints)
     if provider == "gemini":
         findings = _run_gemini_document(pdf_bytes, prompt, config)
     elif provider == "anthropic":

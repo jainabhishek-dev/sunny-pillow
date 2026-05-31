@@ -124,6 +124,23 @@ async def get_checkpoints(request: Request, workflow_id: str = ""):
 
 # ── Review job ─────────────────────────────────────────────────────────────────
 
+@router.post("/preview-prompt")
+async def api_preview_prompt(request: Request, body: dict = Body(...)):
+    """Build and return the default page and document prompts for a set of checkpoints."""
+    _require_user(request)
+    from services.review_ai import _build_vision_prompt, _build_document_prompt
+    checkpoint_ids: list[str] = body.get("checkpoint_ids") or []
+    workflow_id = (body.get("workflow_id") or "").strip()
+    wf = next((w for w in state.WORKFLOWS if w["id"] == workflow_id), {})
+    checkpoints = [state.CHECKPOINT_MAP[cid] for cid in checkpoint_ids if cid in state.CHECKPOINT_MAP]
+    page_cps = [cp for cp in checkpoints if cp.get("scope") != "document"]
+    doc_cps = [cp for cp in checkpoints if cp.get("scope") == "document"]
+    return {
+        "page_prompt": _build_vision_prompt(page_cps, "{page_num}", wf.get("name", "")),
+        "doc_prompt": _build_document_prompt(doc_cps) if doc_cps else "",
+    }
+
+
 @router.post("/check")
 async def api_run_check(request: Request, body: dict = Body(...)):
     """Validate input and create a review job. Returns {job_id}."""
@@ -133,6 +150,8 @@ async def api_run_check(request: Request, body: dict = Body(...)):
     drive_url = (body.get("drive_url") or "").strip()
     workflow_id = (body.get("workflow_id") or "").strip()
     checkpoint_ids: list[str] = body.get("checkpoint_ids") or []
+    custom_page_prompt: str | None = body.get("custom_page_prompt") or None
+    custom_doc_prompt: str | None = body.get("custom_doc_prompt") or None
 
     if not workflow_id or workflow_id not in [w["id"] for w in state.WORKFLOWS]:
         raise HTTPException(status_code=400, detail="Please select a valid workflow.")
@@ -144,6 +163,14 @@ async def api_run_check(request: Request, body: dict = Body(...)):
     selected_checkpoints = [
         state.CHECKPOINT_MAP[cid] for cid in checkpoint_ids if cid in state.CHECKPOINT_MAP
     ]
+
+    # Build and store the actual prompts that will be used for this run
+    from services.review_ai import _build_vision_prompt, _build_document_prompt
+    wf = next((w for w in state.WORKFLOWS if w["id"] == workflow_id), {})
+    page_cps = [cp for cp in selected_checkpoints if cp.get("scope") != "document"]
+    doc_cps = [cp for cp in selected_checkpoints if cp.get("scope") == "document"]
+    page_prompt = custom_page_prompt or _build_vision_prompt(page_cps, "{page_num}", wf.get("name", ""))
+    doc_prompt = custom_doc_prompt or (_build_document_prompt(doc_cps) if doc_cps else "")
 
     loop = asyncio.get_running_loop()
     try:
@@ -167,6 +194,8 @@ async def api_run_check(request: Request, body: dict = Body(...)):
         "title": file_data["title"],
         "workflow_id": workflow_id,
         "checkpoint_ids": [cp["id"] for cp in selected_checkpoints],
+        "page_prompt": page_prompt,
+        "doc_prompt": doc_prompt,
         "status": "processing",
     })
     return {"job_id": job_id, "title": file_data["title"]}

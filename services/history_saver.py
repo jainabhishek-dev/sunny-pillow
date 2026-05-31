@@ -68,6 +68,8 @@ async def save_run_to_history(
             "total_findings": len(all_findings),
             "valid_findings": sum(1 for f in all_findings if f.get("review_status") == "valid"),
             "invalid_findings": sum(1 for f in all_findings if f.get("review_status") == "invalid"),
+            "page_prompt": job.get("page_prompt"),
+            "doc_prompt": job.get("doc_prompt") or None,
         })
         if all_findings:
             db.insert_run_findings([
