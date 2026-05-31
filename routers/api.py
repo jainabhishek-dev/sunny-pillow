@@ -136,7 +136,7 @@ async def api_preview_prompt(request: Request, body: dict = Body(...)):
     page_cps = [cp for cp in checkpoints if cp.get("scope") != "document"]
     doc_cps = [cp for cp in checkpoints if cp.get("scope") == "document"]
     return {
-        "page_prompt": _build_vision_prompt(page_cps, "{page_num}", wf.get("name", "")),
+        "page_prompt": _build_vision_prompt(page_cps, "{page_num}", wf.get("name", "")) if page_cps else "",
         "doc_prompt": _build_document_prompt(doc_cps) if doc_cps else "",
     }
 
