@@ -453,6 +453,39 @@ async def api_admin_get_workflows(request: Request):
     return {"workflows": state.WORKFLOWS, "checkpoint_counts": checkpoint_counts}
 
 
+@router.post("/admin/fix-image-permissions")
+async def api_fix_image_permissions(request: Request):
+    """One-time migration: set public read permission on all existing page images.
+
+    Run this once to backfill permissions on Drive files uploaded before
+    upload_jpeg_to_drive started setting permissions automatically.
+    """
+    _require_admin(request)
+    token = _require_token(request)
+    from services.drive_service import _build_credentials, _build_drive_service
+
+    creds = _build_credentials(token)
+    drive_service = _build_drive_service(creds)
+
+    file_ids = list(set(
+        db.fetch_all_run_page_image_ids() +
+        db.fetch_all_cic_page_image_ids()
+    ))
+
+    ok, failed = 0, []
+    for fid in file_ids:
+        try:
+            drive_service.permissions().create(
+                fileId=fid,
+                body={"type": "anyone", "role": "reader"},
+            ).execute()
+            ok += 1
+        except Exception as e:
+            failed.append({"file_id": fid, "error": str(e)})
+
+    return {"fixed": ok, "failed": len(failed), "failed_ids": failed, "total": len(file_ids)}
+
+
 @router.post("/admin/workflows/add")
 async def api_admin_add_workflow(request: Request, body: dict = Body(...)):
     user = _require_admin(request)

@@ -242,6 +242,30 @@ def fetch_run_pages(run_id: str) -> list[dict]:
     return resp.json()
 
 
+def fetch_all_run_page_image_ids() -> list[str]:
+    """Return all drive_file_id values from run_pages (for permission backfill)."""
+    resp = httpx.get(
+        f"{_base_url()}/run_pages",
+        headers=_headers(),
+        params={"select": "drive_file_id", "drive_file_id": "not.is.null"},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    return [r["drive_file_id"] for r in resp.json() if r.get("drive_file_id")]
+
+
+def fetch_all_cic_page_image_ids() -> list[str]:
+    """Return all drive_file_id values from cic_run_pages (for permission backfill)."""
+    resp = httpx.get(
+        f"{_base_url()}/cic_run_pages",
+        headers=_headers(),
+        params={"select": "drive_file_id", "drive_file_id": "not.is.null"},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    return [r["drive_file_id"] for r in resp.json() if r.get("drive_file_id")]
+
+
 def fetch_run_findings(run_id: str) -> list[dict]:
     resp = httpx.get(
         f"{_base_url()}/run_findings",
