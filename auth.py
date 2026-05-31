@@ -20,7 +20,8 @@ oauth.register(
             "https://www.googleapis.com/auth/documents.readonly "
             "https://www.googleapis.com/auth/presentations.readonly"
         ),
-        "prompt": "select_account",
+        "prompt": "select_account consent",
+        "access_type": "offline",
     },
 )
 
