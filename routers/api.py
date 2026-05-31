@@ -133,9 +133,10 @@ async def api_preview_prompt(request: Request, body: dict = Body(...)):
     workflow_id = (body.get("workflow_id") or "").strip()
     wf = next((w for w in state.WORKFLOWS if w["id"] == workflow_id), {})
     checkpoints = [state.CHECKPOINT_MAP[cid] for cid in checkpoint_ids if cid in state.CHECKPOINT_MAP]
+    page_cps = [cp for cp in checkpoints if cp.get("scope") != "document"]
     doc_cps = [cp for cp in checkpoints if cp.get("scope") == "document"]
     return {
-        "page_prompt": _build_vision_prompt(checkpoints, "{page_num}", wf.get("name", "")),
+        "page_prompt": _build_vision_prompt(page_cps, "{page_num}", wf.get("name", "")),
         "doc_prompt": _build_document_prompt(doc_cps) if doc_cps else "",
     }
 
@@ -166,8 +167,9 @@ async def api_run_check(request: Request, body: dict = Body(...)):
     # Build and store the actual prompts that will be used for this run
     from services.review_ai import _build_vision_prompt, _build_document_prompt
     wf = next((w for w in state.WORKFLOWS if w["id"] == workflow_id), {})
+    page_cps = [cp for cp in selected_checkpoints if cp.get("scope") != "document"]
     doc_cps = [cp for cp in selected_checkpoints if cp.get("scope") == "document"]
-    page_prompt = custom_page_prompt or _build_vision_prompt(selected_checkpoints, "{page_num}", wf.get("name", ""))
+    page_prompt = custom_page_prompt or _build_vision_prompt(page_cps, "{page_num}", wf.get("name", ""))
     doc_prompt = custom_doc_prompt or (_build_document_prompt(doc_cps) if doc_cps else "")
 
     loop = asyncio.get_running_loop()

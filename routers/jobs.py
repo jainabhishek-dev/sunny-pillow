@@ -106,77 +106,79 @@ async def _stream_processing(job_id: str, token: dict, retry_from: int = None):
             state.CHECKPOINT_MAP[cid] for cid in job["checkpoint_ids"] if cid in state.CHECKPOINT_MAP
         ]
 
-        # ── Page-by-page processing ───────────────────────────────────────────
-        for page_num in range(start_page, total_pages + 1):
-            try:
-                page = pdf_document[page_num - 1]
-                mat = fitz.Matrix(2, 2)
-                pix = page.get_pixmap(matrix=mat, alpha=False)
-                img_bytes = pix.tobytes(output="jpeg")
+        page_checkpoints = [cp for cp in selected_checkpoints if cp.get("scope") != "document"]
+        doc_checkpoints  = [cp for cp in selected_checkpoints if cp.get("scope") == "document"]
 
-                img_path = job_dir / f"page_{page_num:03d}.jpg"
-                img_path.write_bytes(img_bytes)
-
-                yield f"event: page_ready\ndata: {json.dumps({'page': page_num, 'total_pages': total_pages})}\n\n"
-
-                findings = await loop.run_in_executor(
-                    None, partial(run_vision_check, img_bytes, selected_checkpoints, page_num, workflow_name,
-                                  job.get("page_prompt") or None)
-                )
-
-                for finding in findings:
-                    finding["id"] = finding_id_counter
-                    finding["page_num"] = page_num
-                    if "location" not in finding or finding["location"] == "":
-                        finding["location"] = f"Page {page_num}"
-                    all_findings.append(finding)
-                    finding_id_counter += 1
-
-                yield f"event: page_findings\ndata: {json.dumps({'page': page_num, 'findings': findings})}\n\n"
-
-                if findings:
-                    reviews = await loop.run_in_executor(
-                        None, partial(run_vision_review, img_bytes, findings, page_num)
-                    )
-                    yield f"event: page_review\ndata: {json.dumps({'page': page_num, 'reviews': reviews})}\n\n"
-
-                    review_map = {r["finding_id"]: r for r in reviews}
-                    for f in findings:
-                        rev = review_map.get(f["id"])
-                        if rev:
-                            f["review_status"] = rev["verdict"]
-                            f["review_comment"] = rev["reason"]
-
-                del img_bytes
-
-            except Exception as e:
-                job["last_successful_page"] = page_num - 1
-                save_job(job_id, job)
+        # ── Page-by-page processing (only if page-scope checkpoints selected) ─
+        if page_checkpoints:
+            for page_num in range(start_page, total_pages + 1):
                 try:
-                    (job_dir / "findings.json").write_text(
-                        json.dumps(all_findings, ensure_ascii=False), encoding="utf-8"
-                    )
-                except Exception as save_error:
-                    yield f"event: error\ndata: {json.dumps({'message': f'Could not save findings: {str(save_error)}'})}\n\n"
+                    page = pdf_document[page_num - 1]
+                    mat = fitz.Matrix(2, 2)
+                    pix = page.get_pixmap(matrix=mat, alpha=False)
+                    img_bytes = pix.tobytes(output="jpeg")
 
-                yield f"event: partial_complete\ndata: {json.dumps({'last_successful_page': page_num - 1, 'total_pages': total_pages, 'error_message': str(e)})}\n\n"
-                return
+                    img_path = job_dir / f"page_{page_num:03d}.jpg"
+                    img_path.write_bytes(img_bytes)
+
+                    yield f"event: page_ready\ndata: {json.dumps({'page': page_num, 'total_pages': total_pages})}\n\n"
+
+                    findings = await loop.run_in_executor(
+                        None, partial(run_vision_check, img_bytes, page_checkpoints, page_num, workflow_name,
+                                      job.get("page_prompt") or None)
+                    )
+
+                    for finding in findings:
+                        finding["id"] = finding_id_counter
+                        finding["page_num"] = page_num
+                        if "location" not in finding or finding["location"] == "":
+                            finding["location"] = f"Page {page_num}"
+                        all_findings.append(finding)
+                        finding_id_counter += 1
+
+                    yield f"event: page_findings\ndata: {json.dumps({'page': page_num, 'findings': findings})}\n\n"
+
+                    if findings:
+                        reviews = await loop.run_in_executor(
+                            None, partial(run_vision_review, img_bytes, findings, page_num)
+                        )
+                        yield f"event: page_review\ndata: {json.dumps({'page': page_num, 'reviews': reviews})}\n\n"
+
+                        review_map = {r["finding_id"]: r for r in reviews}
+                        for f in findings:
+                            rev = review_map.get(f["id"])
+                            if rev:
+                                f["review_status"] = rev["verdict"]
+                                f["review_comment"] = rev["reason"]
+
+                    del img_bytes
+
+                except Exception as e:
+                    job["last_successful_page"] = page_num - 1
+                    save_job(job_id, job)
+                    try:
+                        (job_dir / "findings.json").write_text(
+                            json.dumps(all_findings, ensure_ascii=False), encoding="utf-8"
+                        )
+                    except Exception as save_error:
+                        yield f"event: error\ndata: {json.dumps({'message': f'Could not save findings: {str(save_error)}'})}\n\n"
+
+                    yield f"event: partial_complete\ndata: {json.dumps({'last_successful_page': page_num - 1, 'total_pages': total_pages, 'error_message': str(e)})}\n\n"
+                    return
+
+            try:
+                (job_dir / "findings.json").write_text(
+                    json.dumps(all_findings, ensure_ascii=False), encoding="utf-8"
+                )
+            except Exception as e:
+                yield f"event: error\ndata: {json.dumps({'message': f'Could not save findings: {str(e)}'})}\n\n"
+
+            yield f"event: done\ndata: {json.dumps({'total_findings': len(all_findings)})}\n\n"
 
         pdf_document.close()
         del pdf_document
 
-        try:
-            (job_dir / "findings.json").write_text(
-                json.dumps(all_findings, ensure_ascii=False), encoding="utf-8"
-            )
-        except Exception as e:
-            yield f"event: error\ndata: {json.dumps({'message': f'Could not save findings: {str(e)}'})}\n\n"
-
-        yield f"event: done\ndata: {json.dumps({'total_findings': len(all_findings)})}\n\n"
-
-        # ── Document-level check ──────────────────────────────────────────────
-        doc_checkpoints = [cp for cp in selected_checkpoints if cp.get("scope") == "document"]
-
+        # ── Document-level check (only if document-scope checkpoints selected) ─
         if doc_checkpoints or job.get("doc_prompt"):
             yield f"event: document_start\ndata: {json.dumps({})}\n\n"
             try:
