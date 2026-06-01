@@ -119,30 +119,34 @@ Important Instructions:
 
 # ── Prompts ────────────────────────────────────────────────────────────────────
 
-_QUESTION_EXTRACTION_PROMPT = """\
-You are reading a Mathematics chapter PDF. Extract ONLY questions from Exercises and Additional Exercises.
+_EXERCISE_LIST_PROMPT = """\
+You are reading a Mathematics chapter PDF.
 
-DO NOT extract questions from:
-- Solved Examples / Worked Examples
-- Activities / Projects / Investigations / Lab Activities
-- Side Boxes / Fun Facts / Think and Discuss
-- Warm-up Sections / Concept Checks
-- Any other non-exercise content
+List the names of ALL exercises in this chapter (e.g. "Exercise 5A", "Exercise 5B", "Additional Exercise", etc.).
+Include every exercise that contains questions students must answer.
 
-Treat every subpart independently. Examples: 1, 2(a), 2(b), 3(c)(i)
+DO NOT include: Solved Examples, Activities, Projects, Fun Facts, Think and Discuss, Warm-up sections.
+
+Return a JSON array of strings only. No markdown, no explanation.
+Example: ["Exercise 5A", "Exercise 5B", "Exercise 5C", "Additional Exercise A"]\
+"""
+
+_BATCH_EXTRACTION_PROMPT_TEMPLATE = """\
+You are reading a Mathematics chapter PDF.
+
+Extract ALL questions ONLY from these specific exercises: {exercise_names}
+
+Rules:
+- Treat every subpart independently (e.g. 1, 2(a), 2(b), 3(c)(i)).
+- Do NOT extract questions from Solved Examples, Activities, or any other non-exercise content.
+- Include every question and every subpart from the listed exercises — do not stop early.
 
 Return a JSON array only. No markdown, no explanation.
 Each element must have:
-  "page_no": integer (page number in the chapter where the question appears),
-  "exercise_no": string (e.g. "Exercise 5A", "Exercise 5B", "Additional Exercise A"),
+  "page_no": integer (page number where the question appears),
+  "exercise_no": string (exactly as listed above),
   "question_no": string (e.g. "1", "2(a)", "3(b)(i)")
-
-Example:
-[
-  {"page_no": 3, "exercise_no": "Exercise 5A", "question_no": "1"},
-  {"page_no": 3, "exercise_no": "Exercise 5A", "question_no": "2(a)"},
-  {"page_no": 5, "exercise_no": "Exercise 5B", "question_no": "1"}
-]\
+\
 """
 
 _EXERCISE_REVIEW_PROMPT_TEMPLATE = """\
@@ -173,7 +177,50 @@ Schema:
 
 # ── Gemini runners ─────────────────────────────────────────────────────────────
 
-def _run_gemini_extract(chapter_bytes: bytes, config: dict) -> list[dict]:
+def _run_gemini_list_exercises(chapter_bytes: bytes, config: dict) -> list[str]:
+    import google.generativeai as genai
+
+    api_key = os.getenv(config["api_key_env"])
+    if not api_key:
+        raise RuntimeError(f"API key not found. Set '{config['api_key_env']}'.")
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel(
+        model_name=config["model"],
+        generation_config=genai.types.GenerationConfig(
+            temperature=0.1,
+            max_output_tokens=1024,  # exercise names are tiny output
+        ),
+    )
+    chapter_data = base64.standard_b64encode(chapter_bytes).decode("utf-8")
+    response = model.generate_content([
+        {"mime_type": "application/pdf", "data": chapter_data},
+        _EXERCISE_LIST_PROMPT,
+    ])
+    result = parse_response(response.text)
+    # parse_response returns list[dict], but here the AI returns list[str]
+    # handle both: if strings returned directly, use them; if dicts, extract name field
+    names = []
+    for item in result:
+        if isinstance(item, str):
+            names.append(item)
+        elif isinstance(item, dict):
+            names.append(str(next(iter(item.values()))))
+    # Fallback: parse raw text if JSON parsing failed
+    if not names:
+        import re, json as _json
+        try:
+            raw = response.text.strip()
+            raw = re.sub(r"^```(?:json)?\s*", "", raw)
+            raw = re.sub(r"\s*```$", "", raw)
+            parsed = _json.loads(raw)
+            if isinstance(parsed, list):
+                names = [str(x) for x in parsed if x]
+        except Exception:
+            pass
+    return names
+
+
+def _run_gemini_extract_batch(chapter_bytes: bytes, exercise_names: list[str], config: dict) -> list[dict]:
     import google.generativeai as genai
 
     api_key = os.getenv(config["api_key_env"])
@@ -188,9 +235,11 @@ def _run_gemini_extract(chapter_bytes: bytes, config: dict) -> list[dict]:
         ),
     )
     chapter_data = base64.standard_b64encode(chapter_bytes).decode("utf-8")
+    names_str = ", ".join(f'"{n}"' for n in exercise_names)
+    prompt = _BATCH_EXTRACTION_PROMPT_TEMPLATE.replace("{exercise_names}", names_str)
     response = model.generate_content([
         {"mime_type": "application/pdf", "data": chapter_data},
-        _QUESTION_EXTRACTION_PROMPT,
+        prompt,
     ])
     return parse_response(response.text)
 
@@ -234,7 +283,7 @@ def _run_gemini_review_exercise(
 
 # ── Anthropic runners ──────────────────────────────────────────────────────────
 
-def _run_anthropic_extract(chapter_bytes: bytes, config: dict) -> list[dict]:
+def _run_anthropic_list_exercises(chapter_bytes: bytes, config: dict) -> list[str]:
     import anthropic
 
     api_key = os.getenv(config["api_key_env"])
@@ -244,12 +293,55 @@ def _run_anthropic_extract(chapter_bytes: bytes, config: dict) -> list[dict]:
     chapter_data = base64.standard_b64encode(chapter_bytes).decode("utf-8")
     message = client.messages.create(
         model=config["model"],
+        max_tokens=1024,
+        messages=[{
+            "role": "user",
+            "content": [
+                {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": chapter_data}},
+                {"type": "text", "text": _EXERCISE_LIST_PROMPT},
+            ],
+        }],
+    )
+    raw_text = message.content[0].text
+    result = parse_response(raw_text)
+    names = []
+    for item in result:
+        if isinstance(item, str):
+            names.append(item)
+        elif isinstance(item, dict):
+            names.append(str(next(iter(item.values()))))
+    if not names:
+        import re, json as _json
+        try:
+            raw = raw_text.strip()
+            raw = re.sub(r"^```(?:json)?\s*", "", raw)
+            raw = re.sub(r"\s*```$", "", raw)
+            parsed = _json.loads(raw)
+            if isinstance(parsed, list):
+                names = [str(x) for x in parsed if x]
+        except Exception:
+            pass
+    return names
+
+
+def _run_anthropic_extract_batch(chapter_bytes: bytes, exercise_names: list[str], config: dict) -> list[dict]:
+    import anthropic
+
+    api_key = os.getenv(config["api_key_env"])
+    if not api_key:
+        raise RuntimeError(f"API key not found. Set '{config['api_key_env']}'.")
+    client = anthropic.Anthropic(api_key=api_key)
+    chapter_data = base64.standard_b64encode(chapter_bytes).decode("utf-8")
+    names_str = ", ".join(f'"{n}"' for n in exercise_names)
+    prompt = _BATCH_EXTRACTION_PROMPT_TEMPLATE.replace("{exercise_names}", names_str)
+    message = client.messages.create(
+        model=config["model"],
         max_tokens=config["max_tokens"],
         messages=[{
             "role": "user",
             "content": [
                 {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": chapter_data}},
-                {"type": "text", "text": _QUESTION_EXTRACTION_PROMPT},
+                {"type": "text", "text": prompt},
             ],
         }],
     )
@@ -293,25 +385,72 @@ def _run_anthropic_review_exercise(
     return parse_response(message.content[0].text)
 
 
+# ── Provider dispatchers ───────────────────────────────────────────────────────
+
+def _run_list_exercises(chapter_bytes: bytes, config: dict) -> list[str]:
+    provider = config.get("provider", "gemini")
+    if provider == "gemini":
+        return _run_gemini_list_exercises(chapter_bytes, config)
+    elif provider == "anthropic":
+        return _run_anthropic_list_exercises(chapter_bytes, config)
+    return []
+
+
+def _run_extract_batch(chapter_bytes: bytes, exercise_names: list[str], config: dict) -> list[dict]:
+    provider = config.get("provider", "gemini")
+    if provider == "gemini":
+        results = _run_gemini_extract_batch(chapter_bytes, exercise_names, config)
+    elif provider == "anthropic":
+        results = _run_anthropic_extract_batch(chapter_bytes, exercise_names, config)
+    else:
+        return []
+    required = {"exercise_no", "question_no"}
+    return [r for r in results if isinstance(r, dict) and required.issubset(r.keys())]
+
+
 # ── Public API ─────────────────────────────────────────────────────────────────
+
+EXTRACTION_BATCH_SIZE = 3
+
 
 def extract_ak_questions(chapter_bytes: bytes) -> list[dict]:
     """
     Phase 1: Extract all exercise questions from the chapter PDF.
 
+    Multi-call exercise-aware approach:
+      Call 1: list all exercise names (never truncates — small output)
+      Calls 2–N: extract questions for each batch of EXTRACTION_BATCH_SIZE exercises
+
     Returns a list of question stubs:
         [{"page_no": int, "exercise_no": str, "question_no": str}, ...]
     """
     config = load_model_config()
-    provider = config.get("provider", "gemini")
-    if provider == "gemini":
-        results = _run_gemini_extract(chapter_bytes, config)
-    elif provider == "anthropic":
-        results = _run_anthropic_extract(chapter_bytes, config)
-    else:
+
+    # Call 1: get all exercise names in order
+    exercise_names = _run_list_exercises(chapter_bytes, config)
+    if not exercise_names:
         return []
-    required = {"exercise_no", "question_no"}
-    return [r for r in results if isinstance(r, dict) and required.issubset(r.keys())]
+
+    # Calls 2–N: extract questions in batches
+    all_results: list[dict] = []
+    seen: set[tuple] = set()
+
+    for i in range(0, len(exercise_names), EXTRACTION_BATCH_SIZE):
+        batch = exercise_names[i : i + EXTRACTION_BATCH_SIZE]
+        results = _run_extract_batch(chapter_bytes, batch, config)
+        for r in results:
+            key = (r.get("exercise_no", ""), r.get("question_no", ""))
+            if key not in seen:
+                seen.add(key)
+                all_results.append(r)
+
+    # Sort by exercise order (from listing call), then by page_no within exercise
+    exercise_order = {name: idx for idx, name in enumerate(exercise_names)}
+    all_results.sort(key=lambda r: (
+        exercise_order.get(r.get("exercise_no", ""), 999),
+        r.get("page_no") or 0,
+    ))
+    return all_results
 
 
 def review_ak_exercise(
