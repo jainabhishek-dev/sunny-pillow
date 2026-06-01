@@ -410,47 +410,28 @@ def _run_extract_batch(chapter_bytes: bytes, exercise_names: list[str], config: 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
 
-EXTRACTION_BATCH_SIZE = 3
-
-
-def extract_ak_questions(chapter_bytes: bytes) -> list[dict]:
+def list_exercises(chapter_bytes: bytes) -> list[str]:
     """
-    Phase 1: Extract all exercise questions from the chapter PDF.
+    Call 1: Return the ordered list of exercise names in the chapter.
+    Output is small (just names) — never truncates.
 
-    Multi-call exercise-aware approach:
-      Call 1: list all exercise names (never truncates — small output)
-      Calls 2–N: extract questions for each batch of EXTRACTION_BATCH_SIZE exercises
-
-    Returns a list of question stubs:
-        [{"page_no": int, "exercise_no": str, "question_no": str}, ...]
+    Returns: ["Exercise 5A", "Exercise 5B", ..., "Additional Exercise"]
     """
     config = load_model_config()
+    return _run_list_exercises(chapter_bytes, config)
 
-    # Call 1: get all exercise names in order
-    exercise_names = _run_list_exercises(chapter_bytes, config)
-    if not exercise_names:
-        return []
 
-    # Calls 2–N: extract questions in batches
-    all_results: list[dict] = []
-    seen: set[tuple] = set()
+def extract_exercise_questions(chapter_bytes: bytes, exercise_name: str) -> list[dict]:
+    """
+    Call per exercise: Extract all questions from a single named exercise.
+    One exercise at a time = focused, never truncates.
 
-    for i in range(0, len(exercise_names), EXTRACTION_BATCH_SIZE):
-        batch = exercise_names[i : i + EXTRACTION_BATCH_SIZE]
-        results = _run_extract_batch(chapter_bytes, batch, config)
-        for r in results:
-            key = (r.get("exercise_no", ""), r.get("question_no", ""))
-            if key not in seen:
-                seen.add(key)
-                all_results.append(r)
-
-    # Sort by exercise order (from listing call), then by page_no within exercise
-    exercise_order = {name: idx for idx, name in enumerate(exercise_names)}
-    all_results.sort(key=lambda r: (
-        exercise_order.get(r.get("exercise_no", ""), 999),
-        r.get("page_no") or 0,
-    ))
-    return all_results
+    Returns: [{"page_no": int, "exercise_no": str, "question_no": str}, ...]
+    """
+    config = load_model_config()
+    results = _run_extract_batch(chapter_bytes, [exercise_name], config)
+    required = {"exercise_no", "question_no"}
+    return [r for r in results if isinstance(r, dict) and required.issubset(r.keys())]
 
 
 def review_ak_exercise(

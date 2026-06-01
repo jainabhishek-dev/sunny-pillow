@@ -23,7 +23,7 @@ from utils import (
     cascade_delete_workflow,
 )
 from services.drive_service import get_file_as_pdf, get_pdf_bytes_by_id, fetch_drive_comments_with_pages, download_drive_image
-from services.ak_ai import AK_REVIEW_DEFAULT_PROMPT, extract_ak_questions, review_ak_exercise
+from services.ak_ai import AK_REVIEW_DEFAULT_PROMPT, list_exercises, extract_exercise_questions, review_ak_exercise
 from services.history_saver import save_ak_run_to_history
 
 router = APIRouter()
@@ -545,7 +545,13 @@ async def api_start_ak_job(request: Request):
 
 
 async def _stream_ak_processing(job_id: str, token: dict):
-    """SSE generator for AK Review: multi-call AI approach."""
+    """SSE generator for AK Review.
+
+    Three visible phases:
+      Phase 1 (scanning):   list exercises  → ak_exercises_found
+      Phase 2 (extracting): 1 call/exercise → ak_exercise_extracted per exercise
+      Phase 3 (reviewing):  1 call/exercise → ak_question per question
+    """
     job = load_job(job_id)
     if not job:
         yield f"event: error\ndata: {json.dumps({'message': 'Job not found'})}\n\n"
@@ -574,37 +580,50 @@ async def _stream_ak_processing(job_id: str, token: dict):
             yield f"event: error\ndata: {json.dumps({'message': f'Could not load answer key file: {str(e)}'})}\n\n"
             return
 
-        # Phase 1: Extract all questions from chapter
+        # ── Phase 1: List exercises ──────────────────────────────────────────
         try:
-            all_questions = await loop.run_in_executor(
-                None, partial(extract_ak_questions, chapter_bytes)
+            exercise_names = await loop.run_in_executor(
+                None, partial(list_exercises, chapter_bytes)
             )
         except Exception as e:
-            yield f"event: error\ndata: {json.dumps({'message': f'Question extraction failed: {str(e)}'})}\n\n"
+            yield f"event: error\ndata: {json.dumps({'message': f'Could not list exercises: {str(e)}'})}\n\n"
             return
 
-        if not all_questions:
-            yield f"event: error\ndata: {json.dumps({'message': 'No exercise questions found in the chapter.'})}\n\n"
+        if not exercise_names:
+            yield f"event: error\ndata: {json.dumps({'message': 'No exercises found in the chapter.'})}\n\n"
             return
 
-        # Group questions by exercise, preserving insertion order
-        exercise_order: list[str] = []
+        yield f"event: ak_exercises_found\ndata: {json.dumps({'exercises': exercise_names})}\n\n"
+
+        # ── Phase 2: Extract questions per exercise (1 call each) ────────────
         exercise_map: dict[str, list[dict]] = {}
-        for q in all_questions:
-            ex = q.get("exercise_no", "Unknown")
-            if ex not in exercise_map:
-                exercise_order.append(ex)
-                exercise_map[ex] = []
-            exercise_map[ex].append(q)
+        for exercise_no in exercise_names:
+            try:
+                questions = await loop.run_in_executor(
+                    None, partial(extract_exercise_questions, chapter_bytes, exercise_no)
+                )
+            except Exception as e:
+                yield f"event: error\ndata: {json.dumps({'message': f'Extraction failed for {exercise_no}: {str(e)}'})}\n\n"
+                return
 
-        yield f"event: ak_start\ndata: {json.dumps({'exercises': exercise_order, 'total_questions': len(all_questions)})}\n\n"
+            exercise_map[exercise_no] = questions
+            yield f"event: ak_exercise_extracted\ndata: {json.dumps({'exercise_no': exercise_no, 'question_count': len(questions), 'questions': questions})}\n\n"
 
+        total_questions = sum(len(qs) for qs in exercise_map.values())
+        if total_questions == 0:
+            yield f"event: error\ndata: {json.dumps({'message': 'No questions found in any exercise.'})}\n\n"
+            return
+
+        yield f"event: ak_start\ndata: {json.dumps({'exercises': exercise_names, 'total_questions': total_questions})}\n\n"
+
+        # ── Phase 3: Review each exercise ────────────────────────────────────
         review_prompt = job.get("prompt") or AK_REVIEW_DEFAULT_PROMPT
         all_results: list[dict] = []
 
-        # Phase 2: Review each exercise
-        for exercise_no in exercise_order:
+        for exercise_no in exercise_names:
             questions = exercise_map[exercise_no]
+            if not questions:
+                continue
             yield f"event: ak_exercise_start\ndata: {json.dumps({'exercise_no': exercise_no, 'question_count': len(questions)})}\n\n"
 
             try:
