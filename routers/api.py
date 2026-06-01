@@ -744,7 +744,7 @@ async def api_admin_add_workflow(request: Request, body: dict = Body(...)):
 
         db.insert_workflow({"id": wf_id, "name": name, "description": description,
                             "sort_order": sort_order, "created_by": user["email"],
-                            "type": wf_type if wf_type in ("review", "cic") else "review"})
+                            "type": wf_type if wf_type in ("review", "cic", "ak_review") else "review"})
 
         existing_nums = [
             int(cp["id"].split("_")[1])
@@ -769,7 +769,7 @@ async def api_admin_add_workflow(request: Request, body: dict = Body(...)):
 
     db.insert_workflow({"id": wf_id, "name": name, "description": description,
                         "sort_order": sort_order, "created_by": user["email"],
-                        "type": wf_type if wf_type in ("review", "cic") else "review"})
+                        "type": wf_type if wf_type in ("review", "cic", "ak_review") else "review"})
     state.reload_workflows()
     return {"ok": True, "workflow_id": wf_id}
 
