@@ -211,3 +211,57 @@ async def save_cic_run_to_history(
         print(f"[cic-history] Run {job_id} Drive upload complete: {len(page_records)} images.")
     except Exception as e:
         print(f"[cic-history] Drive upload failed for {job_id}: {e}")
+
+
+async def save_ak_run_to_history(
+    job_id: str,
+    job: dict,
+    question_results: list[dict],
+) -> None:
+    """
+    Persist a completed AK Review run to Supabase immediately.
+    No Drive image uploads — AK Review is table-only.
+
+    Order:
+      1. insert_ak_run — run visible in history immediately
+      2. insert_ak_question_results — all question rows visible immediately
+    """
+    total = len(question_results)
+    present = sum(1 for r in question_results if r.get("present_in_ak") == "Yes")
+    missing = sum(1 for r in question_results if r.get("present_in_ak") == "No")
+    incorrect = sum(1 for r in question_results if r.get("answer_correct") == "No")
+    manual = sum(1 for r in question_results if r.get("answer_correct") == "Manual Review Required")
+
+    try:
+        db.insert_ak_run({
+            "id": job_id,
+            "workflow_id": job.get("workflow_id", ""),
+            "workflow_name": job.get("workflow_name", ""),
+            "checked_by": job.get("checked_by", ""),
+            "chapter_file_name": job.get("chapter_file_title"),
+            "chapter_drive_url": job.get("chapter_drive_url"),
+            "ak_file_name": job.get("ak_file_title"),
+            "ak_drive_url": job.get("ak_drive_url"),
+            "prompt": job.get("prompt"),
+            "total_questions": total,
+            "present_in_ak": present,
+            "missing_from_ak": missing,
+            "incorrect_answers": incorrect,
+            "manual_review_cases": manual,
+        })
+        if question_results:
+            db.insert_ak_question_results([
+                {
+                    "run_id": job_id,
+                    "page_no": r.get("page_no"),
+                    "exercise_no": r.get("exercise_no"),
+                    "question_no": r.get("question_no"),
+                    "present_in_ak": r.get("present_in_ak"),
+                    "answer_correct": r.get("answer_correct"),
+                    "suggestions": r.get("suggestions"),
+                }
+                for r in question_results
+            ])
+        print(f"[ak-history] Run {job_id} saved to Supabase: {total} questions reviewed.")
+    except Exception as e:
+        print(f"[ak-history] Supabase save failed for {job_id}: {e}")

@@ -394,3 +394,76 @@ def update_finding_review(finding_id: str, review_status: str, review_comment: s
         timeout=10,
     )
     resp.raise_for_status()
+
+
+# ── AK Review run helpers ─────────────────────────────────────────────────────
+
+def insert_ak_run(row: dict) -> None:
+    resp = httpx.post(
+        f"{_base_url()}/ak_runs",
+        headers=_headers(),
+        json=row,
+        timeout=15,
+    )
+    resp.raise_for_status()
+
+
+def insert_ak_question_results(rows: list[dict]) -> None:
+    """Batch-insert all question result records for an AK run."""
+    resp = httpx.post(
+        f"{_base_url()}/ak_question_results",
+        headers=_headers(),
+        json=rows,
+        timeout=30,
+    )
+    resp.raise_for_status()
+
+
+def fetch_ak_runs(workflow_id: str | None = None) -> list[dict]:
+    """Fetch all AK runs ordered by most recent first, optionally filtered by workflow."""
+    params: dict = {"order": "created_at.desc"}
+    if workflow_id:
+        params["workflow_id"] = f"eq.{workflow_id}"
+    resp = httpx.get(
+        f"{_base_url()}/ak_runs",
+        headers=_headers(),
+        params=params,
+        timeout=10,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def fetch_ak_run(run_id: str) -> dict | None:
+    resp = httpx.get(
+        f"{_base_url()}/ak_runs",
+        headers=_headers(),
+        params={"id": f"eq.{run_id}", "limit": "1"},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    return data[0] if data else None
+
+
+def fetch_ak_question_results(run_id: str) -> list[dict]:
+    resp = httpx.get(
+        f"{_base_url()}/ak_question_results",
+        headers=_headers(),
+        params={"run_id": f"eq.{run_id}", "order": "id.asc"},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def update_ak_run(run_id: str, fields: dict) -> None:
+    """PATCH arbitrary fields on an ak_run row."""
+    resp = httpx.patch(
+        f"{_base_url()}/ak_runs",
+        headers=_headers(),
+        params={"id": f"eq.{run_id}"},
+        json=fields,
+        timeout=10,
+    )
+    resp.raise_for_status()
