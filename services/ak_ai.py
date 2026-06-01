@@ -122,13 +122,19 @@ Important Instructions:
 _EXERCISE_LIST_PROMPT = """\
 You are reading a Mathematics chapter PDF.
 
-List the names of ALL exercises in this chapter (e.g. "Exercise 5A", "Exercise 5B", "Additional Exercise", etc.).
+List the names of ALL exercises in this chapter (e.g. "Exercise 5A", "Exercise 5B", etc.).
 Include every exercise that contains questions students must answer.
 
 DO NOT include: Solved Examples, Activities, Projects, Fun Facts, Think and Discuss, Warm-up sections.
 
+Important: If the chapter has an "Additional Exercise" section that contains labeled sub-sections
+(e.g. "A. Solve", "B. Application Based Questions", "C. Higher Order Thinking Skills",
+"D. Case Based Questions", "E. Assertion-Reason Based Questions"), list EACH sub-section
+as a separate entry: "Additional Exercise A", "Additional Exercise B", etc.
+Do NOT return a single "Additional Exercise" entry if sub-sections exist.
+
 Return a JSON array of strings only. No markdown, no explanation.
-Example: ["Exercise 5A", "Exercise 5B", "Exercise 5C", "Additional Exercise A"]\
+Example: ["Exercise 5A", "Exercise 5B", "Exercise 5C", "Additional Exercise A", "Additional Exercise B"]\
 """
 
 _BATCH_EXTRACTION_PROMPT_TEMPLATE = """\
