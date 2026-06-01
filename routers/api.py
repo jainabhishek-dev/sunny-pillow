@@ -6,6 +6,7 @@ Every endpoint returns JSON. Auth is enforced via the shared session cookie
 
 import asyncio
 import json
+import re
 import uuid
 from functools import partial
 from typing import Annotated
@@ -544,6 +545,24 @@ async def api_start_ak_job(request: Request):
     }
 
 
+def _sort_key_exercise(name: str) -> tuple:
+    """Sort key for exercise names: Exercise 5A < 5B < ... < Additional Exercise."""
+    import re as _re
+    name_lower = name.lower()
+    if 'additional' in name_lower:
+        return (1, 0, name_lower)
+    m = _re.search(r'(\d+)\s*([a-zA-Z]*)', name)
+    if m:
+        return (0, int(m.group(1)), m.group(2).lower())
+    return (0, 999, name_lower)
+
+
+def _sort_key_question(qno: str) -> str:
+    """Natural sort key for question numbers: 1 < 1(a) < 1(b) < 2 < 2(a) < 10."""
+    import re as _re
+    return _re.sub(r'\d+', lambda m: m.group().zfill(4), (qno or '').lower())
+
+
 async def _stream_ak_processing(job_id: str, token: dict):
     """SSE generator for AK Review.
 
@@ -593,6 +612,11 @@ async def _stream_ak_processing(job_id: str, token: dict):
             yield f"event: error\ndata: {json.dumps({'message': 'No exercises found in the chapter.'})}\n\n"
             return
 
+        # Normalize "Exercise 5 A" → "Exercise 5A" (AI sometimes adds a space)
+        exercise_names = [re.sub(r'(\d)\s+([A-Za-z])', r'\1\2', name) for name in exercise_names]
+        # Sort into correct document order
+        exercise_names = sorted(exercise_names, key=_sort_key_exercise)
+
         yield f"event: ak_exercises_found\ndata: {json.dumps({'exercises': exercise_names})}\n\n"
 
         # ── Phase 2: Extract questions per exercise (1 call each) ────────────
@@ -606,6 +630,7 @@ async def _stream_ak_processing(job_id: str, token: dict):
                 yield f"event: error\ndata: {json.dumps({'message': f'Extraction failed for {exercise_no}: {str(e)}'})}\n\n"
                 return
 
+            questions = sorted(questions, key=lambda q: _sort_key_question(q.get("question_no", "")))
             exercise_map[exercise_no] = questions
             yield f"event: ak_exercise_extracted\ndata: {json.dumps({'exercise_no': exercise_no, 'question_count': len(questions), 'questions': questions})}\n\n"
 
