@@ -385,6 +385,87 @@ def _run_anthropic_review_exercise(
     return parse_response(message.content[0].text)
 
 
+# ── Verification prompt ────────────────────────────────────────────────────────
+
+_EXERCISE_VERIFICATION_PROMPT_TEMPLATE = """\
+You are verifying that all questions from a specific exercise have been captured.
+
+Exercise to verify: {exercise_no}
+
+Questions already found:
+{found_json}
+
+Please scan the chapter PDF carefully for Exercise {exercise_no} and identify ANY questions I missed.
+Only include questions NOT already in the list above.
+Return a JSON array only. Empty array [] if nothing is missing. No markdown, no explanation.
+Same schema: [{{"page_no": <int>, "exercise_no": "<str>", "question_no": "<str>"}}]\
+"""
+
+
+def _run_gemini_verify_exercise(
+    chapter_bytes: bytes,
+    exercise_no: str,
+    found_questions: list[dict],
+    config: dict,
+) -> list[dict]:
+    import google.generativeai as genai
+
+    api_key = os.getenv(config["api_key_env"])
+    if not api_key:
+        raise RuntimeError(f"API key not found. Set '{config['api_key_env']}'.")
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel(
+        model_name=config["model"],
+        generation_config=genai.types.GenerationConfig(
+            temperature=0.1,
+            max_output_tokens=config["max_tokens"],
+        ),
+    )
+    chapter_data = base64.standard_b64encode(chapter_bytes).decode("utf-8")
+    prompt = (
+        _EXERCISE_VERIFICATION_PROMPT_TEMPLATE
+        .replace("{exercise_no}", exercise_no)
+        .replace("{found_json}", json.dumps(found_questions, indent=2))
+    )
+    response = model.generate_content([
+        {"mime_type": "application/pdf", "data": chapter_data},
+        prompt,
+    ])
+    return parse_response(response.text)
+
+
+def _run_anthropic_verify_exercise(
+    chapter_bytes: bytes,
+    exercise_no: str,
+    found_questions: list[dict],
+    config: dict,
+) -> list[dict]:
+    import anthropic
+
+    api_key = os.getenv(config["api_key_env"])
+    if not api_key:
+        raise RuntimeError(f"API key not found. Set '{config['api_key_env']}'.")
+    client = anthropic.Anthropic(api_key=api_key)
+    chapter_data = base64.standard_b64encode(chapter_bytes).decode("utf-8")
+    prompt = (
+        _EXERCISE_VERIFICATION_PROMPT_TEMPLATE
+        .replace("{exercise_no}", exercise_no)
+        .replace("{found_json}", json.dumps(found_questions, indent=2))
+    )
+    message = client.messages.create(
+        model=config["model"],
+        max_tokens=config["max_tokens"],
+        messages=[{
+            "role": "user",
+            "content": [
+                {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": chapter_data}},
+                {"type": "text", "text": prompt},
+            ],
+        }],
+    )
+    return parse_response(message.content[0].text)
+
+
 # ── Provider dispatchers ───────────────────────────────────────────────────────
 
 def _run_list_exercises(chapter_bytes: bytes, config: dict) -> list[str]:
@@ -402,6 +483,23 @@ def _run_extract_batch(chapter_bytes: bytes, exercise_names: list[str], config: 
         results = _run_gemini_extract_batch(chapter_bytes, exercise_names, config)
     elif provider == "anthropic":
         results = _run_anthropic_extract_batch(chapter_bytes, exercise_names, config)
+    else:
+        return []
+    required = {"exercise_no", "question_no"}
+    return [r for r in results if isinstance(r, dict) and required.issubset(r.keys())]
+
+
+def _run_verify_exercise(
+    chapter_bytes: bytes,
+    exercise_no: str,
+    found_questions: list[dict],
+    config: dict,
+) -> list[dict]:
+    provider = config.get("provider", "gemini")
+    if provider == "gemini":
+        results = _run_gemini_verify_exercise(chapter_bytes, exercise_no, found_questions, config)
+    elif provider == "anthropic":
+        results = _run_anthropic_verify_exercise(chapter_bytes, exercise_no, found_questions, config)
     else:
         return []
     required = {"exercise_no", "question_no"}
@@ -432,6 +530,20 @@ def extract_exercise_questions(chapter_bytes: bytes, exercise_name: str) -> list
     results = _run_extract_batch(chapter_bytes, [exercise_name], config)
     required = {"exercise_no", "question_no"}
     return [r for r in results if isinstance(r, dict) and required.issubset(r.keys())]
+
+
+def verify_exercise_questions(
+    chapter_bytes: bytes,
+    exercise_no: str,
+    found_questions: list[dict],
+) -> list[dict]:
+    """
+    Verification pass: check if any questions in exercise_no were missed.
+    Returns only NEW question stubs not already in found_questions.
+    Returns [] if nothing is missing (converged).
+    """
+    config = load_model_config()
+    return _run_verify_exercise(chapter_bytes, exercise_no, found_questions, config)
 
 
 def review_ak_exercise(

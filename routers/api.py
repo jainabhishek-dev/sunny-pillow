@@ -24,7 +24,7 @@ from utils import (
     cascade_delete_workflow,
 )
 from services.drive_service import get_file_as_pdf, get_pdf_bytes_by_id, fetch_drive_comments_with_pages, download_drive_image
-from services.ak_ai import AK_REVIEW_DEFAULT_PROMPT, list_exercises, extract_exercise_questions, review_ak_exercise
+from services.ak_ai import AK_REVIEW_DEFAULT_PROMPT, list_exercises, extract_exercise_questions, verify_exercise_questions, review_ak_exercise
 from services.history_saver import save_ak_run_to_history
 
 router = APIRouter()
@@ -619,7 +619,8 @@ async def _stream_ak_processing(job_id: str, token: dict):
 
         yield f"event: ak_exercises_found\ndata: {json.dumps({'exercises': exercise_names})}\n\n"
 
-        # ── Phase 2: Extract questions per exercise (1 call each) ────────────
+        # ── Phase 2: Extract + verify questions per exercise ─────────────────
+        _MAX_VERIFY_PASSES = 3
         exercise_map: dict[str, list[dict]] = {}
         for exercise_no in exercise_names:
             try:
@@ -629,6 +630,20 @@ async def _stream_ak_processing(job_id: str, token: dict):
             except Exception as e:
                 yield f"event: error\ndata: {json.dumps({'message': f'Extraction failed for {exercise_no}: {str(e)}'})}\n\n"
                 return
+
+            # Verification loop: keep checking until nothing is missing
+            for _pass in range(_MAX_VERIFY_PASSES):
+                try:
+                    missed = await loop.run_in_executor(
+                        None, partial(verify_exercise_questions, chapter_bytes, exercise_no, questions)
+                    )
+                except Exception:
+                    break  # verification failed — proceed with what we have
+                seen_qnos = {q.get("question_no", "") for q in questions}
+                new_qs = [q for q in missed if q.get("question_no", "") not in seen_qnos]
+                if not new_qs:
+                    break  # converged — nothing missed
+                questions = questions + new_qs
 
             questions = sorted(questions, key=lambda q: _sort_key_question(q.get("question_no", "")))
             exercise_map[exercise_no] = questions
